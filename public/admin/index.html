@@ -1,130 +1,62 @@
-<!doctype html>
-<html lang="es">
-<head>
+<!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin — ALFRED IOS STORES</title>
+<title>ALFRED IOS STORES — Admin</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#050b18;color:#fff;font-family:Inter,system-ui,sans-serif}
-button,input,textarea,select{font:inherit}.layout{min-height:100vh;display:grid;grid-template-columns:250px 1fr}
-.side{position:fixed;width:250px;top:0;bottom:0;background:#071225;border-right:1px solid #1b3b62;padding:24px 15px}
-.logo{font-weight:900;font-size:19px;padding:5px 12px 28px}.logo span{color:#39a9ff}.menu{display:grid;gap:7px}
-.menu button{text-align:left;background:transparent;color:#9eb5d0;border:1px solid transparent;padding:13px;border-radius:12px;font-weight:800;cursor:pointer}
-.menu button.active,.menu button:hover{background:#0e2949;color:#fff;border-color:#22558a}
-.content{grid-column:2;padding:28px 4%;max-width:1500px;width:100%;margin:auto}
-.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:25px}.title h1{margin:0}.muted{color:#8fa8c4}
-.top button,.primary{background:#168cff;color:white;border:0;border-radius:11px;padding:11px 15px;font-weight:800;cursor:pointer}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.stat,.panel,.product{background:#09172b;border:1px solid #1d416c;border-radius:17px;padding:18px}
-.stat b{font-size:30px;display:block;margin-top:7px}.section{display:none}.section.active{display:block}
-.split{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
-.productgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.product{padding:0;overflow:hidden}.pimg{height:170px;background:#0c2342;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.pimg img,.pimg video{width:100%;height:100%;object-fit:cover}.pbody{padding:15px}
-.actions{display:flex;gap:8px;margin-top:12px}.actions button{flex:1;border:0;border-radius:10px;padding:10px;font-weight:800;cursor:pointer}
-.edit{background:#168cff;color:white}.toggle{background:#112a47;color:#c5dcf4}
-.list{display:grid;gap:10px}.row{background:#09172b;border:1px solid #1d416c;border-radius:13px;padding:14px;display:flex;justify-content:space-between;gap:10px;align-items:center}
-.row form{display:flex;gap:6px}.row input{width:110px;padding:9px;background:#071326;border:1px solid #294b70;color:#fff;border-radius:8px}
-.row button{background:#168cff;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:800}
-.modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:15px;z-index:20}.modal.show{display:flex}
-.box{background:#09172b;border:1px solid #2b6096;border-radius:18px;padding:20px;width:min(650px,100%);max-height:92vh;overflow:auto}
-.close{float:right;background:#18304d;color:white;border:0;border-radius:9px;padding:8px 11px;cursor:pointer}
-.box input[type=text],.box input[type=number],.box textarea,.box select{width:100%;padding:11px;margin:6px 0 12px;background:#071326;border:1px solid #294b70;color:#fff;border-radius:9px}
-.filebox{border:1px dashed #3876ae;border-radius:12px;padding:14px;margin:7px 0 14px;background:#071326}
-.filebox input{width:100%;margin-top:8px;color:#cde5ff}.preview{margin-top:10px;display:none;max-height:190px;width:100%;object-fit:contain;border-radius:10px;background:#030913}
-.save{background:#168cff;color:#fff;width:100%;border:0;border-radius:10px;padding:13px;font-weight:900;cursor:pointer}
-.status{font-size:13px;color:#91caff;margin-top:7px;min-height:18px}
-@media(max-width:1050px){.productgrid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.layout{display:block}.side{position:sticky;width:100%;height:auto;z-index:10;padding:10px}.logo{padding:5px 10px 10px}.menu{display:flex;overflow:auto}.menu button{white-space:nowrap}.content{padding:18px 14px}.productgrid,.split,.stats{grid-template-columns:1fr 1fr}.stat b{font-size:24px}}
-@media(max-width:450px){.productgrid,.split,.stats{grid-template-columns:1fr}.row{align-items:flex-start;flex-direction:column}.row form{width:100%}}
-</style>
-</head>
-<body>
-<div class="layout">
-<aside class="side"><div class="logo">ALFRED <span>IOS STORES</span></div><nav class="menu">
-<button class="active" onclick="show('home',this)">📊 Inicio</button>
-<button onclick="show('products',this)">📦 Productos</button>
-<button onclick="show('users',this)">👥 Clientes</button>
-<button onclick="show('topups',this)">💳 Recargas</button>
-<button onclick="show('orders',this)">🛒 Pedidos</button>
-<button onclick="show('ledger',this)">📒 Movimientos</button>
-<button onclick="location.href='/'">🌐 Ver tienda</button>
-</nav></aside>
-<main class="content">
-<div class="top"><div class="title"><h1 id="heading">Resumen</h1><div class="muted">Panel de control</div></div><button onclick="location.href='/'">Tienda</button></div>
-<section id="home" class="section active"><div class="stats"><div class="stat">Clientes<b id="susers">0</b></div><div class="stat">Productos<b id="sproducts">0</b></div><div class="stat">Ventas<b id="ssales">0</b></div></div><div class="split"><div class="panel"><h3>💳 Recargas pendientes</h3><b id="stopups">0</b></div><div class="panel"><h3>🛒 Pedidos pendientes</h3><b id="sorders">0</b></div></div></section>
-<section id="products" class="section"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><h2>Productos</h2><button class="primary" onclick="newProduct()">＋ Nuevo producto</button></div><div class="productgrid" id="productgrid"></div></section>
-<section id="users" class="section"><div class="list" id="userslist"></div></section>
-<section id="topups" class="section"><div class="list" id="topupslist"></div></section>
-<section id="orders" class="section"><div class="list" id="orderslist"></div></section>
-<section id="ledger" class="section"><div class="list" id="ledgerlist"></div></section>
-</main></div>
+*{box-sizing:border-box}body{margin:0;background:#050b18;color:#fff;font-family:Inter,system-ui,sans-serif}button,input,textarea{font:inherit}
+.login{min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 10%,#123b73,transparent 45%),#050b18}
+.loginbox{width:min(430px,100%);background:#09172b;border:1px solid #28598a;border-radius:20px;padding:28px;box-shadow:0 20px 70px #0008}.loginbox h1{margin-top:0}.loginbox span{color:#39a9ff}
+.loginbox input{width:100%;margin:7px 0 13px;padding:13px;border-radius:10px;border:1px solid #294b70;background:#071326;color:#fff}.primary{width:100%;padding:13px;border:0;border-radius:10px;background:#168cff;color:#fff;font-weight:900}.err{color:#ff8585;min-height:22px;margin-top:10px}
+.app{display:none}.layout{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.side{position:fixed;width:250px;top:0;bottom:0;background:#071225;border-right:1px solid #1b3b62;padding:24px 15px}.logo{font-weight:900;font-size:19px;padding:5px 12px 28px}.logo span{color:#39a9ff}.menu{display:grid;gap:7px}.menu button{background:transparent;color:#9eb5d0;border:1px solid transparent;padding:13px;border-radius:12px;text-align:left;font-weight:800;cursor:pointer}.menu button.active,.menu button:hover{background:#0e2949;color:#fff;border-color:#22558a}
+.content{grid-column:2;padding:28px 4%;max-width:1500px;width:100%;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.top h1{margin:0}.top button{background:#122b48;color:#fff;border:0;border-radius:10px;padding:10px 14px}.muted{color:#8fa8c4}
+.section{display:none}.section.active{display:block}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.stat,.panel,.card{background:#09172b;border:1px solid #1d416c;border-radius:17px;padding:18px}.stat b{display:block;font-size:30px;margin-top:6px}.split{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:15px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{padding:0;overflow:hidden}.thumb{height:165px;background:#0b2240;display:flex;align-items:center;justify-content:center}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:15px}.actions{display:flex;gap:8px;margin-top:12px}.actions button,.row button{border:0;border-radius:9px;padding:10px 12px;font-weight:800;cursor:pointer}.edit{background:#168cff;color:#fff}.dark{background:#112a47;color:#cce4ff}.list{display:grid;gap:10px}.row{background:#09172b;border:1px solid #1d416c;border-radius:13px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:10px}.row form{display:flex;gap:7px}.row input{width:110px;padding:9px;background:#071326;color:#fff;border:1px solid #294b70;border-radius:8px}
+.modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:15px;z-index:20}.modal.show{display:flex}.box{width:min(650px,100%);max-height:92vh;overflow:auto;background:#09172b;border:1px solid #2b6096;border-radius:18px;padding:20px}.close{float:right;background:#18304d;color:#fff;border:0;border-radius:8px;padding:8px;cursor:pointer}.box input[type=text],.box input[type=number],.box textarea{width:100%;padding:11px;margin:6px 0 12px;background:#071326;color:#fff;border:1px solid #294b70;border-radius:9px}.filebox{border:1px dashed #3876ae;border-radius:12px;padding:13px;margin:8px 0 14px;background:#071326}.filebox input{width:100%;margin-top:8px;color:#cfe7ff}.preview{display:none;width:100%;max-height:190px;object-fit:contain;border-radius:10px;margin-top:8px;background:#030913}.status{font-size:13px;color:#8ecbff;min-height:18px;margin-top:6px}.save{width:100%;padding:13px;border:0;border-radius:10px;background:#168cff;color:#fff;font-weight:900}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:700px){.layout{display:block}.side{position:sticky;width:100%;height:auto;padding:10px;z-index:10}.logo{padding:5px 10px 10px}.menu{display:flex;overflow:auto}.menu button{white-space:nowrap}.content{padding:18px 14px}.stats,.split,.grid{grid-template-columns:1fr 1fr}}@media(max-width:450px){.stats,.split,.grid{grid-template-columns:1fr}.row{flex-direction:column;align-items:flex-start}.row form{width:100%}}
+</style></head><body>
 
-<div class="modal" id="modal"><div class="box">
-<button class="close" onclick="closeModal()">Cerrar</button><h2 id="modalTitle">Editar producto</h2>
-<input id="eid" type="hidden">
-<label>Nombre</label><input id="ename" type="text">
-<label>Categoría</label><input id="ecat" type="text">
-<label>Precio</label><input id="eprice" type="number" min="0">
-<label>Descripción</label><textarea id="edesc" rows="3"></textarea>
+<div id="login" class="login"><form class="loginbox" onsubmit="login(event)">
+<h1>ALFRED <span>IOS STORES</span></h1><p class="muted">Panel de administración</p>
+<label>Correo</label><input id="email" type="email" autocomplete="username" required>
+<label>Contraseña</label><input id="password" type="password" autocomplete="current-password" required>
+<button class="primary">Entrar al panel</button><div id="err" class="err"></div>
+</form></div>
 
-<div class="filebox"><b>📷 Imagen del producto</b><div class="muted">Selecciona directamente desde Fotos/Galería del iPhone.</div>
-<input id="eimageFile" type="file" accept="image/*" onchange="previewImage(this)">
-<img id="imagePreview" class="preview">
-<div id="imageStatus" class="status"></div></div>
+<div id="app" class="app"><div class="layout"><aside class="side"><div class="logo">ALFRED <span>IOS STORES</span></div><nav class="menu">
+<button class="active" onclick="show('home',this)">📊 Inicio</button><button onclick="show('products',this)">📦 Productos</button><button onclick="show('users',this)">👥 Clientes</button><button onclick="show('topups',this)">💳 Recargas</button><button onclick="show('orders',this)">🛒 Pedidos</button><button onclick="show('ledger',this)">📒 Movimientos</button><button onclick="logout()">🚪 Cerrar sesión</button><button onclick="location.href='/'">🌐 Ver tienda</button>
+</nav></aside><main class="content"><div class="top"><div><h1 id="heading">Resumen</h1><div class="muted">Panel de control</div></div><button onclick="location.href='/'">Tienda</button></div>
+<section id="home" class="section active"><div class="stats"><div class="stat">Clientes<b id="susers">0</b></div><div class="stat">Productos<b id="sproducts">0</b></div><div class="stat">Ventas<b id="ssales">0</b></div></div><div class="split"><div class="panel">💳 Recargas pendientes <b id="stopups">0</b></div><div class="panel">🛒 Pedidos pendientes <b id="sorders">0</b></div></div></section>
+<section id="products" class="section"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><h2>Productos</h2><button class="edit" style="border:0;border-radius:9px;padding:10px 13px;font-weight:800" onclick="newProduct()">＋ Nuevo</button></div><div id="grid" class="grid"></div></section>
+<section id="users" class="section"><div id="userslist" class="list"></div></section><section id="topups" class="section"><div id="topupslist" class="list"></div></section><section id="orders" class="section"><div id="orderslist" class="list"></div></section><section id="ledger" class="section"><div id="ledgerlist" class="list"></div></section>
+</main></div></div>
 
-<div class="filebox"><b>🎥 Video del producto</b><div class="muted">Selecciona el video directamente desde Fotos/Galería del iPhone.</div>
-<input id="evideoFile" type="file" accept="video/*" onchange="previewVideo(this)">
-<video id="videoPreview" class="preview" controls></video>
-<div id="videoStatus" class="status"></div></div>
-
-<label>MediaFire (enlace de descarga)</label><input id="emedia" type="text" placeholder="https://www.mediafire.com/...">
-<label><input id="eactive" type="checkbox" style="width:auto"> Producto activo</label>
-<button class="save" onclick="saveProduct()">Guardar cambios</button>
-</div></div>
+<div id="modal" class="modal"><div class="box"><button class="close" onclick="closeModal()">Cerrar</button><h2 id="modalTitle">Producto</h2><input id="pid" type="hidden"><label>Nombre</label><input id="name" type="text"><label>Categoría</label><input id="category" type="text"><label>Precio</label><input id="price" type="number" min="0"><label>Descripción</label><textarea id="desc" rows="3"></textarea>
+<div class="filebox"><b>📷 Imagen desde Fotos/Galería</b><input id="imageFile" type="file" accept="image/*" onchange="previewImage(this)"><img id="imagePreview" class="preview"><div id="imageStatus" class="status"></div></div>
+<div class="filebox"><b>🎥 Video desde Fotos/Galería</b><input id="videoFile" type="file" accept="video/*" onchange="previewVideo(this)"><video id="videoPreview" class="preview" controls></video><div id="videoStatus" class="status"></div></div>
+<label>MediaFire</label><input id="mediafire" type="text"><label><input id="active" type="checkbox" style="width:auto"> Activo</label><button class="save" onclick="saveProduct()">Guardar cambios</button></div></div>
 
 <script>
-let data={products:[],users:[],topups:[],purchases:[]};
-let editingId=null, oldImage='', oldVideo='';
-
-async function api(url,opt={}){let r=await fetch(url,opt);if(!r.ok)throw Error(await r.text());return r.json()}
-async function load(){try{data=await api('/api/admin/data');draw()}catch(e){document.body.innerHTML='<div style="padding:40px;color:white">No autorizado. Inicia sesión como administrador.</div>'}}
-function show(id,btn){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.menu button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.getElementById('heading').textContent=btn.textContent.replace(/^\\S+\\s/,'')}
-function draw(){
-let p=data.products||[],u=data.users||[],t=data.topups||[],o=data.purchases||[];
-susers.textContent=u.length;sproducts.textContent=p.length;ssales.textContent=o.length;stopups.textContent=t.filter(x=>x.status==='pending').length;sorders.textContent=o.filter(x=>x.status!=='delivered').length;
-productgrid.innerHTML=p.map(x=>`<article class="product"><div class="pimg">${x.image?`<img src="${x.image}">`:'📱'}</div><div class="pbody"><h3>${x.name}</h3><div class="muted">${x.category||''}</div><b>RD$${x.price}</b><div class="actions"><button class="edit" onclick="editProduct(${x.id})">✏️ Editar</button><button class="toggle" onclick="toggleProduct(${x.id},${x.active?0:1})">${x.active?'Desactivar':'Activar'}</button></div></div></article>`).join('');
-userslist.innerHTML=u.map(x=>`<div class="row"><div><b>${x.email}</b><div class="muted">Saldo: RD$${x.balance}</div></div><form onsubmit="addBalance(event,${x.id})"><input type="number" min="1" placeholder="Monto"><button>+ Saldo</button></form></div>`).join('');
-topupslist.innerHTML=t.map(x=>`<div class="row"><div><b>RD$${x.amount}</b><div class="muted">${x.email||''} · ${x.status}</div>${x.receipt?`<a href="${x.receipt}" target="_blank" style="color:#5db6ff">Ver comprobante</a>`:''}</div><div>${x.status==='pending'?`<button onclick="topup(${x.id},'approve')">Aprobar</button> <button onclick="topup(${x.id},'reject')">Rechazar</button>`:''}</div></div>`).join('');
-orderslist.innerHTML=o.map(x=>`<div class="row"><div><b>Pedido #${x.id}</b><div class="muted">${x.email||''} · ${x.product_name||''} · RD$${x.price} · ${x.status}</div></div>${x.status!=='delivered'?`<button onclick="deliver(${x.id})">Marcar entregado</button>`:''}</div>`).join('');
-ledgerlist.innerHTML=[...t.map(x=>({d:x.created_at,type:'Recarga',email:x.email,amount:x.amount,status:x.status})),...o.map(x=>({d:x.created_at,type:'Pedido',email:x.email,amount:-x.price,status:x.status}))].sort((a,b)=>String(b.d).localeCompare(String(a.d))).map(x=>`<div class="row"><div><b>${x.type}</b><div class="muted">${x.email||''} · ${x.status} · ${x.d||''}</div></div><b>RD$${x.amount}</b></div>`).join('');
-}
-function newProduct(){editingId=null;oldImage='';oldVideo='';modalTitle.textContent='Nuevo producto';ename.value='';ecat.value='Sensibilidades';eprice.value='';edesc.value='';emedia.value='';eactive.checked=true;eimageFile.value='';evideoFile.value='';imagePreview.style.display='none';videoPreview.style.display='none';imageStatus.textContent='';videoStatus.textContent='';modal.classList.add('show')}
-function editProduct(id){let x=data.products.find(p=>p.id===id);editingId=id;oldImage=x.image||'';oldVideo=x.video||'';modalTitle.textContent='Editar producto';ename.value=x.name||'';ecat.value=x.category||'';eprice.value=x.price||0;edesc.value=x.description||'';emedia.value=x.mediafire_url||'';eactive.checked=!!x.active;eimageFile.value='';evideoFile.value='';imageStatus.textContent='';videoStatus.textContent='';if(oldImage){imagePreview.src=oldImage;imagePreview.style.display='block'}else imagePreview.style.display='none';if(oldVideo){videoPreview.src=oldVideo;videoPreview.style.display='block'}else videoPreview.style.display='none';modal.classList.add('show')}
+let data={products:[],users:[],topups:[],purchases:[]},editing=null,oldImage='',oldVideo='';
+async function api(url,opt={}){let r=await fetch(url,opt);if(!r.ok){let e={};try{e=await r.json()}catch(_){ }throw Error(e.error||'Error del servidor')}return r.json()}
+async function boot(){try{data=await api('/api/admin/data');document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';draw()}catch(e){document.getElementById('login').style.display='grid'}}
+async function login(e){e.preventDefault();err.textContent='';try{await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value.trim(),password:password.value})});await boot()}catch(x){err.textContent=x.message}}
+async function logout(){await fetch('/api/admin/logout',{method:'POST'});location.reload()}
+function show(id,b){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.menu button').forEach(x=>x.classList.remove('active'));b.classList.add('active');heading.textContent=b.textContent.replace(/^\\S+\\s/,'')}
+function draw(){let p=data.products||[],u=data.users||[],t=data.topups||[],o=data.purchases||[];susers.textContent=u.length;sproducts.textContent=p.length;ssales.textContent=o.length;stopups.textContent=t.filter(x=>x.status==='pending').length;sorders.textContent=o.filter(x=>x.status!=='delivered').length;
+grid.innerHTML=p.map(x=>`<article class="card"><div class="thumb">${x.image?`<img src="${x.image}">`:'📱'}</div><div class="cardbody"><h3>${x.name}</h3><div class="muted">${x.category}</div><h3>RD$${x.price}</h3><div class="actions"><button class="edit" onclick="editProduct(${x.id})">✏️ Editar</button><button class="dark" onclick="toggle(${x.id},${x.active?0:1})">${x.active?'Desactivar':'Activar'}</button></div></div></article>`).join('');
+userslist.innerHTML=u.map(x=>`<div class="row"><div><b>${x.email}</b><div class="muted">Saldo: RD$${x.balance}</div></div><form onsubmit="balance(event,${x.id})"><input type="number" min="1" placeholder="Monto"><button>+ Saldo</button></form></div>`).join('');
+topupslist.innerHTML=t.map(x=>`<div class="row"><div><b>RD$${x.amount}</b><div class="muted">${x.email} · ${x.status}</div>${x.receipt?`<a href="${x.receipt}" target="_blank" style="color:#6abaff">Ver comprobante</a>`:''}</div>${x.status==='pending'?`<div><button onclick="topup(${x.id},'approve')">Aprobar</button> <button onclick="topup(${x.id},'reject')">Rechazar</button></div>`:''}</div>`).join('');
+orderslist.innerHTML=o.map(x=>`<div class="row"><div><b>Pedido #${x.id}</b><div class="muted">${x.email} · ${x.product_name} · RD$${x.price} · ${x.status}</div></div>${x.status!=='delivered'?`<button onclick="deliver(${x.id})">Marcar entregado</button>`:''}</div>`).join('');
+ledgerlist.innerHTML=o.map(x=>`<div class="row"><div><b>Pedido #${x.id}</b><div class="muted">${x.email} · ${x.created_at}</div></div><b>RD$-${x.price}</b></div>`).join('')}
+function resetFiles(){imageFile.value='';videoFile.value='';imagePreview.style.display='none';videoPreview.style.display='none';imageStatus.textContent='';videoStatus.textContent=''}
+function newProduct(){editing=null;oldImage='';oldVideo='';modalTitle.textContent='Nuevo producto';pid.value='';name.value='';category.value='Sensibilidades';price.value='';desc.value='';mediafire.value='';active.checked=true;resetFiles();modal.classList.add('show')}
+function editProduct(id){let x=data.products.find(p=>p.id===id);editing=id;oldImage=x.image||'';oldVideo=x.video||'';modalTitle.textContent='Editar producto';name.value=x.name;category.value=x.category;price.value=x.price;desc.value=x.description||'';mediafire.value=x.mediafire_url||'';active.checked=!!x.active;resetFiles();if(oldImage){imagePreview.src=oldImage;imagePreview.style.display='block'}if(oldVideo){videoPreview.src=oldVideo;videoPreview.style.display='block'}modal.classList.add('show')}
 function closeModal(){modal.classList.remove('show')}
-function previewImage(input){let f=input.files[0];if(!f)return;imagePreview.src=URL.createObjectURL(f);imagePreview.style.display='block';imageStatus.textContent=f.name}
-function previewVideo(input){let f=input.files[0];if(!f)return;videoPreview.src=URL.createObjectURL(f);videoPreview.style.display='block';videoStatus.textContent=f.name}
-async function uploadFile(input,statusEl,type){
-let f=input.files[0];if(!f)return null;
-statusEl.textContent='Subiendo '+type+'...';
-let fd=new FormData();fd.append('file',f);
-let r=await fetch('/api/admin/upload-media',{method:'POST',body:fd});
-if(!r.ok)throw Error(await r.text());
-let x=await r.json();statusEl.textContent='✓ '+type+' guardado';return x.url;
-}
-async function saveProduct(){
-try{
- let image=oldImage,video=oldVideo;
- if(eimageFile.files[0]) image=await uploadFile(eimageFile,imageStatus,'imagen');
- if(evideoFile.files[0]) video=await uploadFile(evideoFile,videoStatus,'video');
- let body={name:ename.value.trim(),category:ecat.value.trim(),price:Number(eprice.value),description:edesc.value,image,video,mediafire_url:emedia.value.trim(),active:eactive.checked?1:0};
- let url=editingId?'/api/admin/products/'+editingId:'/api/admin/products';
- await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- closeModal();await load();
-}catch(e){alert('No se pudo guardar: '+e.message)}
-}
-async function toggleProduct(id,active){await api('/api/admin/products/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:data.products.find(x=>x.id===id).name,category:data.products.find(x=>x.id===id).category,price:Number(data.products.find(x=>x.id===id).price),description:data.products.find(x=>x.id===id).description||'',image:data.products.find(x=>x.id===id).image||'',video:data.products.find(x=>x.id===id).video||'',mediafire_url:data.products.find(x=>x.id===id).mediafire_url||'',active})});load()}
-async function addBalance(e,id){e.preventDefault();let n=e.target.querySelector('input').value;if(!n)return;await api('/api/admin/users/'+id+'/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:Number(n)})});load()}
-async function topup(id,action){await api('/api/admin/topup/'+id+'/'+action,{method:'POST'});load()}
-async function deliver(id){await api('/api/admin/purchase/'+id+'/deliver',{method:'POST'});load()}
-load();
-</script>
-</body></html>
+function previewImage(i){if(i.files[0]){imagePreview.src=URL.createObjectURL(i.files[0]);imagePreview.style.display='block';imageStatus.textContent=i.files[0].name}}
+function previewVideo(i){if(i.files[0]){videoPreview.src=URL.createObjectURL(i.files[0]);videoPreview.style.display='block';videoStatus.textContent=i.files[0].name}}
+async function uploadMedia(input,status){let f=input.files[0];if(!f)return null;status.textContent='Subiendo...';let fd=new FormData();fd.append('file',f);let x=await api('/api/admin/upload-media',{method:'POST',body:fd});status.textContent='✓ Subido';return x.url}
+async function saveProduct(){try{let image=oldImage,video=oldVideo;if(imageFile.files[0])image=await uploadMedia(imageFile,imageStatus);if(videoFile.files[0])video=await uploadMedia(videoFile,videoStatus);let body={name:name.value.trim(),category:category.value.trim(),price:Number(price.value),description:desc.value,image,video,mediafire_url:mediafire.value.trim(),active:active.checked?1:0};let url=editing?'/api/admin/products/'+editing:'/api/admin/products';await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeModal();await boot()}catch(e){alert(e.message)}}
+async function toggle(id,a){let x=data.products.find(p=>p.id===id);await api('/api/admin/products/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...x,price:Number(x.price),active:a})});boot()}
+async function balance(e,id){e.preventDefault();let n=e.target.querySelector('input').value;if(n)await api('/api/admin/users/'+id+'/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:Number(n)})});boot()}
+async function topup(id,a){await api('/api/admin/topup/'+id+'/'+(a==='approve'?'approve':'reject'),{method:'POST'});boot()}
+async function deliver(id){await api('/api/admin/purchase/'+id+'/deliver',{method:'POST'});boot()}
+boot();
+</script></body></html>
