@@ -88,13 +88,13 @@ app.get("/api/products",(req,res)=>{
 app.post("/api/register",async(req,res)=>{
  const {name,email,password}=req.body;
  if(!name||!email||!password||password.length<8)return res.status(400).json({error:"Completa los datos. La contraseña debe tener 8 caracteres o más."});
- try{const h=await bcrypt.hash(password,12);const x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name.trim(),email.trim().toLowerCase(),h);setAuth(res,{userId:x.lastInsertRowid,exp:Date.now()+604800000});res.json({ok:true});}
+ try{const h=await bcrypt.hash(password,12);const x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name.trim(),email.trim().toLowerCase(),h);setAuth(res,{userId:x.lastInsertRowid,exp:Date.now()+2592000000});res.json({ok:true});}
  catch(e){res.status(400).json({error:"Ese correo ya está registrado."});}
 });
 app.post("/api/login",async(req,res)=>{
  const u=db.prepare("SELECT * FROM users WHERE email=?").get((req.body.email||"").toLowerCase());
  if(!u||!(await bcrypt.compare(req.body.password||"",u.password_hash)))return res.status(401).json({error:"Correo o contraseña incorrectos."});
- setAuth(res,{userId:u.id,exp:Date.now()+604800000});res.json({ok:true});
+ setAuth(res,{userId:u.id,exp:Date.now()+2592000000});res.json({ok:true});
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/me",user,(req,res)=>res.json(db.prepare("SELECT id,name,email,balance,created_at FROM users WHERE id=?").get(req.auth.userId)));
@@ -119,7 +119,7 @@ app.post("/api/buy",user,(req,res)=>{
 });
 
 app.post("/api/admin/login",(req,res)=>{
- if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+604800000});return res.json({ok:true});}
+ if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+2592000000});return res.json({ok:true});}
  res.status(401).json({error:"Credenciales incorrectas."});
 });
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
