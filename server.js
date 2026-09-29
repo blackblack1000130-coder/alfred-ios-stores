@@ -69,7 +69,9 @@ function clearAuth(res){res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=/; Htt
 app.use((req,res,next)=>{req.auth=readAuth(req);next();});
 app.use(express.static(path.join(__dirname,"public")));
 
-const upload=multer({dest:path.join(__dirname,"public","uploads"),limits:{fileSize:10*1024*1024}});
+const UPLOAD_DIR=path.join(__dirname,"public","uploads");
+fs.mkdirSync(UPLOAD_DIR,{recursive:true});
+const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
@@ -137,6 +139,15 @@ app.post("/api/admin/topup/:id/approve",admin,(req,res)=>{
 });
 app.post("/api/admin/topup/:id/reject",admin,(req,res)=>{db.prepare("UPDATE topups SET status='rejected' WHERE id=? AND status='pending'").run(req.params.id);res.json({ok:true})});
 app.post("/api/admin/purchase/:id/deliver",admin,(req,res)=>{db.prepare("UPDATE purchases SET status='delivered' WHERE id=?").run(req.params.id);res.json({ok:true})});
+app.post("/api/admin/upload-media",admin,upload.single("file"),(req,res)=>{
+ if(!req.file)return res.status(400).json({error:"No se recibió ningún archivo."});
+ const mime=req.file.mimetype||"";
+ if(!mime.startsWith("image/")&&!mime.startsWith("video/")){
+   try{fs.unlinkSync(req.file.path)}catch(e){}
+   return res.status(400).json({error:"Solo se permiten imágenes o videos."});
+ }
+ res.json({ok:true,type:mime.startsWith("image/")?"image":"video",url:"/uploads/"+path.basename(req.file.path),name:req.file.originalname});
+});
 app.post("/api/admin/products",admin,(req,res)=>{
  const {name,category,price,description,image,video,mediafire_url}=req.body;
  if(!name||!category||!Number.isInteger(Number(price)))return res.status(400).json({error:"Datos inválidos."});
