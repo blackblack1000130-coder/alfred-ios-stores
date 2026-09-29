@@ -36,6 +36,8 @@ if(db.prepare("SELECT COUNT(*) c FROM products").get().c===0){
 
 app.use(express.json());
 app.use(express.urlencoded({extended:true}));
+// Render runs behind a proxy; trust it so secure session cookies work over HTTPS.
+app.set("trust proxy", 1);
 app.use(session({secret:process.env.SESSION_SECRET||"CAMBIAR_SESSION_SECRET",resave:false,saveUninitialized:false,cookie:{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:604800000}}));
 app.use(express.static(path.join(__dirname,"public")));
 
