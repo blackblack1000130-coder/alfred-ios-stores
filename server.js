@@ -142,11 +142,8 @@ app.post("/api/admin/purchase/:id/deliver",admin,(req,res)=>{db.prepare("UPDATE 
 app.post("/api/admin/upload-media",admin,upload.single("file"),(req,res)=>{
  if(!req.file)return res.status(400).json({error:"No se recibió ningún archivo."});
  const mime=req.file.mimetype||"";
- if(!mime.startsWith("image/")&&!mime.startsWith("video/")){
-   try{fs.unlinkSync(req.file.path)}catch(e){}
-   return res.status(400).json({error:"Solo se permiten imágenes o videos."});
- }
- res.json({ok:true,type:mime.startsWith("image/")?"image":"video",url:"/uploads/"+path.basename(req.file.path),name:req.file.originalname});
+ if(!mime.startsWith("image/")&&!mime.startsWith("video/")){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"Solo se permiten imágenes o videos."});}
+ res.json({ok:true,type:mime.startsWith("image/")?"image":"video",url:"/uploads/"+path.basename(req.file.path)});
 });
 app.post("/api/admin/products",admin,(req,res)=>{
  const {name,category,price,description,image,video,mediafire_url}=req.body;
