@@ -21,3 +21,9 @@ La contraseña se configura únicamente en Render mediante `ADMIN_PASSWORD`; no 
 
 ## Subida a GitHub
 Sube TODO el contenido de este paquete, no el ZIP dentro del repositorio. No subas `.env`.
+
+## Render Free
+
+Esta edición no usa Persistent Disk ni `/var/data`, por lo que puede arrancar en un Web Service Free.
+
+**Importante:** el almacenamiento local de Render Free es efímero: la base SQLite y archivos subidos pueden perderse en reinicios, redeploys o spin-down. Render recomienda usar un datastore para datos que deban persistir. Esta edición es adecuada para prueba/preview; para una tienda real con cuentas, balances, compras y comprobantes, se debe migrar la persistencia a PostgreSQL u otro almacenamiento externo. 
