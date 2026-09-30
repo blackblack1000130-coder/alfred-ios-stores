@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: alfred-ios-stores
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: ./data/store.db
