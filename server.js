@@ -35,6 +35,40 @@ if(db.prepare("SELECT COUNT(*) c FROM products").get().c===0){
  db.transaction(()=>initial.forEach(x=>ins.run(...x)))();
 }
 
+
+// Catálogo solicitado para la tienda pública.
+// Mantiene las imágenes, videos y enlaces MediaFire existentes cuando un producto ya existe.
+const catalog=[
+  ["Sensi Alto (Dcl-BR)","Filza",40,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi cuello (Dcl-BR)","Filza",30,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi pecho (BR)","Filza",45,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi barriga (BR)","Filza",50,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensibilidad mágica (BR)","Filza",50,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["HOLOGRAMA — Ver arma","Filza",15,"Ver arma · iOS 14/27."],
+  ["HOLOGRAMA — Ver personajes","Filza",15,"Ver personajes · iOS 14/27."],
+  ["HOLOGRAMA — Ver completo","Filza",20,"Ver completo · iOS 14/26.0.1."],
+  ["Sensi Alto (Dcl-BR)","3105",40,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi cuello (Dcl-BR)","3105",30,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi pecho (BR)","3105",45,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensi barriga (BR)","3105",50,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["Sensibilidad mágica (BR)","3105",50,"Sensibilidad disponible para todas las versiones iOS 14–27 excepto iOS 18.7.1–10."],
+  ["HOLOGRAMA — Ver arma","3105",15,"Ver arma · iOS 14/27."],
+  ["HOLOGRAMA — Ver personajes","3105",15,"Ver personajes · iOS 14/27."],
+  ["HOLOGRAMA — Ver completo","3105",20,"Ver completo · iOS 14/26.0.1."],
+  ["Ver arma y personaje","iMazing",15,"Ver arma y personaje · iOS 14/27."]
+];
+db.prepare("UPDATE products SET active=0 WHERE category='Sensibilidades'").run();
+const findProduct=db.prepare("SELECT id FROM products WHERE name=? AND category=? LIMIT 1");
+const updateProduct=db.prepare("UPDATE products SET price=?,description=?,active=1 WHERE id=?");
+const insertProduct=db.prepare("INSERT INTO products(name,category,price,description,active) VALUES(?,?,?,?,1)");
+db.transaction(()=>{
+  for(const [name,category,price,description] of catalog){
+    const existing=findProduct.get(name,category);
+    if(existing) updateProduct.run(price,description,existing.id);
+    else insertProduct.run(name,category,price,description);
+  }
+})();
+
 app.use(express.json());
 app.use(express.urlencoded({extended:true}));
 // Stateless authentication cookie: survives Render Free restarts/sleeping instances.
