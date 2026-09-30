@@ -20,36 +20,7 @@ CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TE
 CREATE TABLE IF NOT EXISTS topups(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,receipt TEXT NOT NULL,status TEXT DEFAULT 'pending',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,product_id INTEGER NOT NULL,price INTEGER NOT NULL,status TEXT DEFAULT 'pending_delivery',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id),FOREIGN KEY(product_id) REFERENCES products(id));
 CREATE TABLE IF NOT EXISTS balance_adjustments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id));
-CREATE TABLE IF NOT EXISTS compatibility_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,min_version TEXT NOT NULL,max_version TEXT NOT NULL,compatible INTEGER NOT NULL DEFAULT 1,enabled INTEGER NOT NULL DEFAULT 1);
 `);
-
-// Campos de entrega digital. Se agregan sin borrar datos existentes.
-for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"]]) {
-  const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
-  if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
-}
-for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
-  const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
-  if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
-}
-// La categoría queda congelada en cada compra para que una compra de Filza
-// nunca pueda terminar habilitando la IPA de 3105 o iMazing.
-const purchaseCategoryExists = db.prepare(`PRAGMA table_info(purchases)`).all().some(x => x.name === 'purchase_category');
-if (!purchaseCategoryExists) db.exec(`ALTER TABLE purchases ADD COLUMN purchase_category TEXT DEFAULT ''`);
-db.prepare(`UPDATE purchases SET purchase_category=(SELECT category FROM products WHERE products.id=purchases.product_id) WHERE purchase_category IS NULL OR purchase_category=''`).run();
-
-db.exec(`CREATE TABLE IF NOT EXISTS category_downloads(category TEXT PRIMARY KEY, ipa_url TEXT DEFAULT '', ipa_name TEXT DEFAULT '')`);
-for (const c of ['Filza','3105','iMazing']) db.prepare("INSERT OR IGNORE INTO category_downloads(category) VALUES(?)").run(c);
-const compatCount=db.prepare('SELECT COUNT(*) c FROM compatibility_rules').get().c;
-if(!compatCount){
- const ins=db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)');
- db.transaction(()=>{
-  ins.run('iOS 14.0.0 → 18.6.1','14.0.0','18.6.1',1);
-  ins.run('iOS 18.7.1 → 18.7.10','18.7.1','18.7.10',0);
-  ins.run('iOS 26.0.1 → 26.6.2','26.0.1','26.6.2',1);
-  ins.run('iOS 27.0.0 beta 1 → beta 6','27.0.0 beta 1','27.0.0 beta 6',1);
- })();
-}
 
 const initial=[
 ["Sensibilidad Alto","Sensibilidades",45,"Ajuste de sensibilidad para iPhone."],
@@ -139,40 +110,15 @@ const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
 
-
-function versionParts(v){
- const raw=String(v||'').trim().toLowerCase();
- const m=raw.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/); if(!m)return null;
- const nums=[Number(m[1]),Number(m[2]||0),Number(m[3]||0)];
- const bm=raw.match(/beta\s*(\d+)/); return {a:nums[0],b:nums[1],c:nums[2],beta:bm?Number(bm[1]):null};
-}
-function compareVersions(a,b){
- const x=versionParts(a),y=versionParts(b); if(!x||!y)return null;
- for(const k of ['a','b','c']){if(x[k]!==y[k])return x[k]-y[k];}
- if(x.beta!==null || y.beta!==null){ if(x.beta===null)return 1; if(y.beta===null)return -1; return x.beta-y.beta; }
- return 0;
-}
-function compatibilityFor(version){
- if(!version)return {known:false,compatible:null,message:'Indica tu versión exacta de iOS.'};
- const rules=db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all();
- for(const r of rules){const lo=compareVersions(version,r.min_version),hi=compareVersions(version,r.max_version); if(lo!==null&&hi!==null&&lo>=0&&hi<=0)return {known:true,compatible:!!r.compatible,label:r.label};}
- return {known:false,compatible:null,message:'Esta versión no está configurada en el panel.'};
-}
-
 app.get("/api/settings",(req,res)=>res.json({
  payment_method:"Banreservas",payment_account:"9605206264",
  delivery_notice:"La entrega puede tardar de 1 a 2 horas.",
- compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel."
+ compatibility_notice:"Estas sensibilidades son compatibles para todos dispositivos iPhone desde iOS 14 a iOS 27, excepto iOS 18.7.1–18.7.10 por el momento."
 }));
 
 app.get("/api/products",(req,res)=>{
  const c=req.query.category;
- // Nunca exponemos enlaces de entrega/IPA desde el catálogo público.
- // La descarga se autoriza exclusivamente desde /api/my-products para compras del usuario.
- const sqlBase=`SELECT id,name,category,price,description,image,video,active,created_at FROM products WHERE active=1`;
- const rows=c&&c!=="Todas"
-   ?db.prepare(sqlBase+" AND category=? ORDER BY id DESC").all(c)
-   :db.prepare(sqlBase+" ORDER BY id DESC").all();
+ const rows=c&&c!=="Todas"?db.prepare("SELECT * FROM products WHERE active=1 AND category=? ORDER BY id DESC").all(c):db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id DESC").all();
  res.json(rows);
 });
 app.post("/api/register",async(req,res)=>{
@@ -187,34 +133,8 @@ app.post("/api/login",async(req,res)=>{
  setAuth(res,{userId:u.id,exp:Date.now()+2592000000});res.json({ok:true});
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
-app.get("/api/me",user,(req,res)=>{
- const u=db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users WHERE id=?").get(req.auth.userId);
- res.json({...u,compatibility:compatibilityFor(u.ios_version)});
-});
-app.get("/api/my-device",user,(req,res)=>res.json(db.prepare("SELECT iphone_model,ios_version FROM users WHERE id=?").get(req.auth.userId)));
-app.post("/api/my-device",user,(req,res)=>{
- const model=String(req.body.iphone_model||'').trim(), version=String(req.body.ios_version||'').trim();
- if(!model||!version)return res.status(400).json({error:'Indica el modelo y la versión exacta de iOS.'});
- const compatibility=compatibilityFor(version);
- db.prepare('UPDATE users SET iphone_model=?,ios_version=? WHERE id=?').run(model,version,req.auth.userId);
- res.json({ok:true,iphone_model:model,ios_version:version,compatibility});
-});
-app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
-app.get("/api/my-products",user,(req,res)=>{
- const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,COALESCE(NULLIF(pu.purchase_category,''),p.category) AS category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
- CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_name FROM category_downloads cd WHERE cd.category=COALESCE(NULLIF(pu.purchase_category,''),p.category)),'') ELSE '' END AS ipa_name,
- CASE WHEN pu.status='delivered' THEN 1 ELSE 0 END AS ipa_enabled
- FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
- res.json(rows);
-});
-app.get("/api/my-products/:purchaseId/ipa",user,(req,res)=>{
- const purchase=db.prepare(`SELECT pu.id,pu.status,COALESCE(NULLIF(pu.purchase_category,''),p.category) AS category FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.id=? AND pu.user_id=?`).get(Number(req.params.purchaseId),req.auth.userId);
- if(!purchase) return res.status(404).json({error:'Compra no encontrada.'});
- if(purchase.status!=='delivered') return res.status(403).json({error:'La IPA todavía no está habilitada.'});
- const ipa=db.prepare('SELECT ipa_url,ipa_name FROM category_downloads WHERE category=?').get(purchase.category);
- if(!ipa || !ipa.ipa_url) return res.status(404).json({error:'La IPA de esta categoría todavía no ha sido configurada.'});
- res.json({ok:true,category:purchase.category,ipa_url:ipa.ipa_url,ipa_name:ipa.ipa_name||('IPA '+purchase.category)});
-});
+app.get("/api/me",user,(req,res)=>res.json(db.prepare("SELECT id,name,email,balance,created_at FROM users WHERE id=?").get(req.auth.userId)));
+app.get("/api/my-products",user,(req,res)=>res.json(db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.mediafire_url,p.image,p.video FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId)));
 app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
@@ -229,7 +149,7 @@ app.post("/api/buy",user,(req,res)=>{
  if(u.balance<p.price)return res.status(400).json({error:"Saldo insuficiente. Agrega saldo primero."});
  db.transaction(()=>{
    db.prepare("UPDATE users SET balance=balance-? WHERE id=?").run(p.price,req.auth.userId);
-   db.prepare("INSERT INTO purchases(user_id,product_id,price,purchase_category) VALUES(?,?,?,?)").run(req.auth.userId,p.id,p.price,p.category);
+   db.prepare("INSERT INTO purchases(user_id,product_id,price) VALUES(?,?,?)").run(req.auth.userId,p.id,p.price);
  })();
  res.json({ok:true,message:"Compra realizada. La entrega puede tardar de 1 a 2 horas."});
 });
@@ -240,11 +160,10 @@ app.post("/api/admin/login",(req,res)=>{
 });
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/admin/data",admin,(req,res)=>res.json({
- users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users ORDER BY id DESC").all(),
- products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
+ users:db.prepare("SELECT id,name,email,balance,created_at FROM users ORDER BY id DESC").all(),
+ products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(),
  topups:db.prepare("SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC").all(),
- purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all(),
- compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all()
+ purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all()
 }));
 app.post("/api/admin/topup/:id/approve",admin,(req,res)=>{
  const t=db.prepare("SELECT * FROM topups WHERE id=?").get(req.params.id);
@@ -260,50 +179,19 @@ app.post("/api/admin/upload-media",admin,upload.single("file"),(req,res)=>{
  if(!mime.startsWith("image/")&&!mime.startsWith("video/")){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"Solo se permiten imágenes o videos."});}
  res.json({ok:true,type:mime.startsWith("image/")?"image":"video",url:"/uploads/"+path.basename(req.file.path)});
 });
-app.post("/api/admin/upload-file",admin,upload.single("file"),(req,res)=>{
- if(!req.file)return res.status(400).json({error:"No se recibió ningún archivo."});
- const ext=path.extname(req.file.originalname||"").toLowerCase();
- const allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];
- if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"Tipo de archivo no permitido. Usa IPA, ZIP, RAR, 7Z, PDF o DMG."});}
- const target=path.join(UPLOAD_DIR,crypto.randomBytes(8).toString('hex')+ext);
- fs.renameSync(req.file.path,target);
- res.json({ok:true,url:"/uploads/"+path.basename(target)});
-});
-app.post("/api/admin/category-downloads",admin,(req,res)=>{
- const category=String(req.body.category||'').trim();
- const ipa_url=String(req.body.ipa_url||'').trim();
- const ipa_name=String(req.body.ipa_name||'').trim();
- if(!['Filza','3105','iMazing'].includes(category)) return res.status(400).json({error:"Categoría no válida."});
- db.prepare("INSERT INTO category_downloads(category,ipa_url,ipa_name) VALUES(?,?,?) ON CONFLICT(category) DO UPDATE SET ipa_url=excluded.ipa_url,ipa_name=excluded.ipa_name").run(category,ipa_url,ipa_name);
- res.json({ok:true});
-});
 app.post("/api/admin/products",admin,(req,res)=>{
- const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url}=req.body;
+ const {name,category,price,description,image,video,mediafire_url}=req.body;
  if(!name||!category||!Number.isInteger(Number(price)))return res.status(400).json({error:"Datos inválidos."});
- const x=db.prepare("INSERT INTO products(name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url) VALUES(?,?,?,?,?,?,?,?,?,?)").run(name,category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"");
+ const x=db.prepare("INSERT INTO products(name,category,price,description,image,video,mediafire_url) VALUES(?,?,?,?,?,?,?)").run(name,category,Number(price),description||"",image||"",video||"",mediafire_url||"");
  res.json({ok:true,id:x.lastInsertRowid});
 });
 app.post("/api/admin/products/:id",admin,(req,res)=>{
- const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,active}=req.body;
+ const {name,category,price,description,image,video,mediafire_url,active}=req.body;
  if(!name||!category||!Number.isInteger(Number(price))||Number(price)<0)return res.status(400).json({error:"Datos inválidos."});
- const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,mega_url=?,file_password=?,ipa_url=?,active=? WHERE id=?").run(name.trim(),category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"",active?1:0,req.params.id);
+ const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,active=? WHERE id=?").run(name.trim(),category,Number(price),description||"",image||"",video||"",mediafire_url||"",active?1:0,req.params.id);
  if(!result.changes)return res.status(404).json({error:"Producto no encontrado."});
  res.json({ok:true});
 });
-app.post('/api/admin/compatibility/:id',admin,(req,res)=>{
- const id=Number(req.params.id), label=String(req.body.label||'').trim(), min_version=String(req.body.min_version||'').trim(), max_version=String(req.body.max_version||'').trim();
- const compatible=req.body.compatible?1:0, enabled=req.body.enabled===false?0:1;
- if(!label||!versionParts(min_version)||!versionParts(max_version))return res.status(400).json({error:'Regla de versión inválida.'});
- if(compareVersions(min_version,max_version)>0)return res.status(400).json({error:'La versión mínima no puede ser mayor que la máxima.'});
- const r=db.prepare('UPDATE compatibility_rules SET label=?,min_version=?,max_version=?,compatible=?,enabled=? WHERE id=?').run(label,min_version,max_version,compatible,enabled,id);
- if(!r.changes)return res.status(404).json({error:'Regla no encontrada.'}); res.json({ok:true});
-});
-app.post('/api/admin/compatibility',admin,(req,res)=>{
- const label=String(req.body.label||'').trim(), min_version=String(req.body.min_version||'').trim(), max_version=String(req.body.max_version||'').trim(), compatible=req.body.compatible?1:0;
- if(!label||!versionParts(min_version)||!versionParts(max_version)||compareVersions(min_version,max_version)>0)return res.status(400).json({error:'Datos de compatibilidad inválidos.'});
- const x=db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)').run(label,min_version,max_version,compatible); res.json({ok:true,id:x.lastInsertRowid});
-});
-
 app.post("/api/admin/users/:id/balance",admin,(req,res)=>{
  const amount=Number(req.body.amount);
  const note=(req.body.note||"Ajuste manual del administrador").trim();
