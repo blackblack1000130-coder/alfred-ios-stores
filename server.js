@@ -12,8 +12,9 @@ const DB_PATH=process.env.DB_PATH||path.join(__dirname,"data","store.db");
 const ADMIN_EMAIL=process.env.ADMIN_EMAIL||"Blackblack1000130@gmail.com";
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"CAMBIAR_ESTA_CLAVE";
 fs.mkdirSync(path.dirname(DB_PATH),{recursive:true});
-const db=new Database(DB_PATH);
+const db=new Database(DB_PATH, { timeout: 10000 });
 db.pragma("journal_mode=WAL");
+db.pragma("foreign_keys=ON");
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,balance INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,category TEXT NOT NULL,price INTEGER NOT NULL,description TEXT DEFAULT '',image TEXT DEFAULT '',video TEXT DEFAULT '',mediafire_url TEXT DEFAULT '',active INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -151,6 +152,8 @@ function compatibilityFor(version){
  return {known:false,compatible:null,message:'Esta versión no está configurada en el panel.'};
 }
 
+app.get("/api/health",(req,res)=>{try{db.prepare("SELECT 1").get();res.json({ok:true});}catch(e){console.error("HEALTH_ERROR",e);res.status(500).json({ok:false});}});
+
 app.get("/api/settings",(req,res)=>res.json({
  payment_method:"Banreservas",payment_account:"9605206264",
  delivery_notice:"La entrega puede tardar de 1 a 2 horas.",
@@ -163,22 +166,30 @@ app.get("/api/products",(req,res)=>{
  res.json(rows);
 });
 app.post("/api/register",async(req,res)=>{
- const name=String(req.body?.name||'').trim();
- const email=String(req.body?.email||'').trim().toLowerCase();
- const password=String(req.body?.password||'');
- if(name.length<2)return res.status(400).json({error:"Escribe tu nombre."});
- if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Escribe un correo válido."});
- if(password.length<8)return res.status(400).json({error:"La contraseña debe tener 8 caracteres o más."});
- const existing=db.prepare("SELECT id FROM users WHERE email=? LIMIT 1").get(email);
- if(existing)return res.status(409).json({error:"Ese correo ya está registrado. Inicia sesión o usa otro correo."});
  try{
+   const name=String(req.body?.name||'').trim();
+   const email=String(req.body?.email||'').trim().toLowerCase();
+   const password=String(req.body?.password||'');
+   if(name.length<2)return res.status(400).json({error:"Escribe tu nombre."});
+   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Escribe un correo válido."});
+   if(password.length<8)return res.status(400).json({error:"La contraseña debe tener 8 caracteres o más."});
+   const existing=db.prepare("SELECT id FROM users WHERE lower(email)=lower(?) LIMIT 1").get(email);
+   if(existing)return res.status(409).json({error:"Ese correo ya está registrado. Inicia sesión o usa otro correo."});
    const h=await bcrypt.hash(password,12);
-   const x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name,email,h);
-   setAuth(res,{userId:x.lastInsertRowid,exp:Date.now()+31536000000});
+   let x;
+   try{
+     x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name,email,h);
+   }catch(e){
+     if(String(e.code||'').includes('SQLITE_CONSTRAINT')){
+       return res.status(409).json({error:"Ese correo ya está registrado. Inicia sesión o usa otro correo."});
+     }
+     throw e;
+   }
+   setAuth(res,{userId:Number(x.lastInsertRowid),exp:Date.now()+31536000000});
    res.json({ok:true});
  }catch(e){
    console.error("REGISTER_ERROR",e);
-   res.status(500).json({error:"No se pudo crear la cuenta. Inténtalo nuevamente."});
+   res.status(500).json({error:"No se pudo crear la cuenta en este momento. Revisa la conexión e inténtalo nuevamente."});
  }
 });
 app.post("/api/login",async(req,res)=>{
