@@ -42,12 +42,7 @@ if(!compatCount){
   ins.run('iOS 18.7.1 → 18.7.10','18.7.1','18.7.10',0);
   ins.run('iOS 26.0.1 → 26.6.2','26.0.1','26.6.2',1);
   ins.run('iOS 27.0.0 beta 1 → beta 6','27.0.0 beta 1','27.0.0 beta 6',1);
-  ins.run('iOS 27.0.0 estable','27.0.0','27.0.0',1);
  })();
-}
-// Si ya existía una base de datos anterior, asegura también la regla de iOS 27.0.0 estable.
-if(!db.prepare("SELECT 1 FROM compatibility_rules WHERE min_version='27.0.0' AND max_version='27.0.0'").get()) {
- db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)').run('iOS 27.0.0 estable','27.0.0','27.0.0',1);
 }
 
 const initial=[
@@ -196,7 +191,8 @@ app.post("/api/my-device",user,(req,res)=>{
 app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
 app.get("/api/my-products",user,(req,res)=>{
  const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
- CASE WHEN pu.status='delivered' THEN COALESCE(NULLIF(p.ipa_url,''),(SELECT ipa_url FROM category_downloads cd WHERE cd.category=p.category)) ELSE '' END AS ipa_url
+ CASE WHEN pu.status='delivered' THEN (SELECT ipa_url FROM category_downloads cd WHERE cd.category=p.category) ELSE '' END AS ipa_url,
+(SELECT ipa_name FROM category_downloads cd WHERE cd.category=p.category) AS ipa_name
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
