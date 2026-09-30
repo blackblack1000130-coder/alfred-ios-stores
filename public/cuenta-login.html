@@ -1,1 +1,26 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cuenta</title><style>body{margin:0;background:#040910;color:white;font-family:Arial}.box{max-width:430px;margin:55px auto;padding:25px;background:#0d1722;border:1px solid #23445d;border-radius:18px}input{width:100%;padding:13px;margin:7px 0;background:#06101a;color:#fff;border:1px solid #2a4b63;border-radius:9px}button{padding:12px 16px;border:0;border-radius:9px;background:#0789ff;color:#fff;font-weight:bold}.tab{margin-right:7px}.msg{color:#8fa4b6}</style></head><body><div class="box"><h1>ALFRED IOS STORES</h1><button class="tab" onclick="mode('login')">Entrar</button><button class="tab" onclick="mode('reg')">Crear cuenta</button><form id="login"><input id="le" type="email" placeholder="Correo" required><input id="lp" type="password" placeholder="Contraseña" required><button>Iniciar sesión</button></form><form id="reg" style="display:none"><input id="rn" placeholder="Nombre" required><input id="re" type="email" placeholder="Correo" required><input id="rp" type="password" placeholder="Contraseña (8+)" required><button>Crear cuenta</button></form><p id="msg" class="msg"></p><a href="/" style="color:#55c7ff">← Tienda</a></div><script>function mode(x){login.style.display=x==='login'?'block':'none';reg.style.display=x==='reg'?'block':'none'}login.onsubmit=async e=>{e.preventDefault();let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:le.value,password:lp.value})}),j=await r.json();msg.textContent=j.error||(r.ok?'Correcto':'No se pudo completar la operación.');if(r.ok)location.href='/cuenta.html'};reg.onsubmit=async e=>{e.preventDefault();let r=await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:rn.value,email:re.value,password:rp.value})}),j=await r.json();msg.textContent=j.error||(r.ok?'Cuenta creada correctamente.':'No se pudo crear la cuenta.');if(r.ok)location.href='/cuenta.html'}fetch('/api/me',{cache:'no-store'}).then(r=>{if(r.ok)location.href='/cuenta.html'}).catch(()=>{});</script></body></html>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cuenta</title><style>body{margin:0;background:#040910;color:white;font-family:Arial}.box{max-width:430px;margin:55px auto;padding:25px;background:#0d1722;border:1px solid #23445d;border-radius:18px}input{width:100%;padding:13px;margin:7px 0;background:#06101a;color:#fff;border:1px solid #2a4b63;border-radius:9px}button{padding:12px 16px;border:0;border-radius:9px;background:#0789ff;color:#fff;font-weight:bold}.tab{margin-right:7px}.msg{color:#8fa4b6}</style></head><body><div class="box"><h1>ALFRED IOS STORES</h1><button class="tab" onclick="mode('login')">Entrar</button><button class="tab" onclick="mode('reg')">Crear cuenta</button><form id="login"><input id="le" type="email" placeholder="Correo" required><input id="lp" type="password" placeholder="Contraseña" required><button>Iniciar sesión</button></form><form id="reg" style="display:none"><input id="rn" placeholder="Nombre" required><input id="re" type="email" placeholder="Correo" required><input id="rp" type="password" placeholder="Contraseña (8+)" required><button>Crear cuenta</button></form><p id="msg" class="msg"></p><a href="/" style="color:#55c7ff">← Tienda</a></div><script>
+const $=id=>document.getElementById(id);
+const msg=$('msg');
+function mode(x){$('login').style.display=x==='login'?'block':'none';$('reg').style.display=x==='reg'?'block':'none';msg.textContent='';}
+async function jsonFetch(url,options){
+  try{
+    const r=await fetch(url,options);
+    const text=await r.text();
+    let j={}; try{j=text?JSON.parse(text):{}}catch(e){j={error:'El servidor devolvió una respuesta no válida.'}}
+    return {r,j};
+  }catch(e){return {r:{ok:false,status:0},j:{error:'No se pudo conectar con la tienda. Inténtalo nuevamente.'}};}
+}
+$('login').onsubmit=async e=>{
+  e.preventDefault(); msg.textContent='Iniciando sesión...';
+  const {r,j}=await jsonFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('le').value.trim(),password:$('lp').value})});
+  msg.textContent=j.error||(r.ok?'Correcto':'No se pudo iniciar sesión.'); if(r.ok)location.href='/cuenta.html';
+};
+$('reg').onsubmit=async e=>{
+  e.preventDefault(); msg.textContent='Creando cuenta...';
+  const password=$('rp').value;
+  if(password.length<8){msg.textContent='La contraseña debe tener 8 caracteres o más.';return;}
+  const {r,j}=await jsonFetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('rn').value.trim(),email:$('re').value.trim(),password})});
+  msg.textContent=j.error||(r.ok?'Cuenta creada correctamente.':'No se pudo crear la cuenta.'); if(r.ok)location.href='/cuenta.html';
+};
+fetch('/api/me',{cache:'no-store'}).then(r=>{if(r.ok)location.href='/cuenta.html'}).catch(()=>{});
+</script></body></html>
