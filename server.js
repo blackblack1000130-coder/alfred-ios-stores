@@ -20,22 +20,30 @@ CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TE
 CREATE TABLE IF NOT EXISTS topups(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,receipt TEXT NOT NULL,status TEXT DEFAULT 'pending',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,product_id INTEGER NOT NULL,price INTEGER NOT NULL,status TEXT DEFAULT 'pending_delivery',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id),FOREIGN KEY(product_id) REFERENCES products(id));
 CREATE TABLE IF NOT EXISTS balance_adjustments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS compatibility_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,min_version TEXT NOT NULL,max_version TEXT NOT NULL,compatible INTEGER NOT NULL DEFAULT 1,enabled INTEGER NOT NULL DEFAULT 1);
 `);
-
-for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
-  const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
-  if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
-}
-db.exec(`CREATE TABLE IF NOT EXISTS compatibility_settings(id INTEGER PRIMARY KEY CHECK(id=1), allowed_ranges TEXT NOT NULL DEFAULT '14.0.0-18.6.1\n26.0.1-26.6.2\n27.0.0-beta1-27.0.0-beta6', blocked_ranges TEXT NOT NULL DEFAULT '18.7.1-18.7.10', note TEXT NOT NULL DEFAULT '')`);
-db.prepare("INSERT OR IGNORE INTO compatibility_settings(id) VALUES(1)").run();
 
 // Campos de entrega digital. Se agregan sin borrar datos existentes.
 for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
 }
+for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
+  const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
+  if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
+}
 db.exec(`CREATE TABLE IF NOT EXISTS category_downloads(category TEXT PRIMARY KEY, ipa_url TEXT DEFAULT '', ipa_name TEXT DEFAULT '')`);
 for (const c of ['Filza','3105','iMazing']) db.prepare("INSERT OR IGNORE INTO category_downloads(category) VALUES(?)").run(c);
+const compatCount=db.prepare('SELECT COUNT(*) c FROM compatibility_rules').get().c;
+if(!compatCount){
+ const ins=db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)');
+ db.transaction(()=>{
+  ins.run('iOS 14.0.0 → 18.6.1','14.0.0','18.6.1',1);
+  ins.run('iOS 18.7.1 → 18.7.10','18.7.1','18.7.10',0);
+  ins.run('iOS 26.0.1 → 26.6.2','26.0.1','26.6.2',1);
+  ins.run('iOS 27.0.0 beta 1 → beta 6','27.0.0 beta 1','27.0.0 beta 6',1);
+ })();
+}
 
 const initial=[
 ["Sensibilidad Alto","Sensibilidades",45,"Ajuste de sensibilidad para iPhone."],
@@ -125,10 +133,30 @@ const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
 
+
+function versionParts(v){
+ const raw=String(v||'').trim().toLowerCase();
+ const m=raw.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/); if(!m)return null;
+ const nums=[Number(m[1]),Number(m[2]||0),Number(m[3]||0)];
+ const bm=raw.match(/beta\s*(\d+)/); return {a:nums[0],b:nums[1],c:nums[2],beta:bm?Number(bm[1]):null};
+}
+function compareVersions(a,b){
+ const x=versionParts(a),y=versionParts(b); if(!x||!y)return null;
+ for(const k of ['a','b','c']){if(x[k]!==y[k])return x[k]-y[k];}
+ if(x.beta!==null || y.beta!==null){ if(x.beta===null)return 1; if(y.beta===null)return -1; return x.beta-y.beta; }
+ return 0;
+}
+function compatibilityFor(version){
+ if(!version)return {known:false,compatible:null,message:'Indica tu versión exacta de iOS.'};
+ const rules=db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all();
+ for(const r of rules){const lo=compareVersions(version,r.min_version),hi=compareVersions(version,r.max_version); if(lo!==null&&hi!==null&&lo>=0&&hi<=0)return {known:true,compatible:!!r.compatible,label:r.label};}
+ return {known:false,compatible:null,message:'Esta versión no está configurada en el panel.'};
+}
+
 app.get("/api/settings",(req,res)=>res.json({
  payment_method:"Banreservas",payment_account:"9605206264",
  delivery_notice:"La entrega puede tardar de 1 a 2 horas.",
- compatibility_notice:"Estas sensibilidades son compatibles para todos dispositivos iPhone desde iOS 14 a iOS 27, excepto iOS 18.7.1–18.7.10 por el momento."
+ compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel."
 }));
 
 app.get("/api/products",(req,res)=>{
@@ -148,18 +176,19 @@ app.post("/api/login",async(req,res)=>{
  setAuth(res,{userId:u.id,exp:Date.now()+2592000000});res.json({ok:true});
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
-app.get("/api/me",user,(req,res)=>res.json(db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users WHERE id=?").get(req.auth.userId)));
-app.get("/api/compatibility",(req,res)=>{
- const s=db.prepare("SELECT allowed_ranges,blocked_ranges,note FROM compatibility_settings WHERE id=1").get();
- res.json(s);
+app.get("/api/me",user,(req,res)=>{
+ const u=db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users WHERE id=?").get(req.auth.userId);
+ res.json({...u,compatibility:compatibilityFor(u.ios_version)});
 });
+app.get("/api/my-device",user,(req,res)=>res.json(db.prepare("SELECT iphone_model,ios_version FROM users WHERE id=?").get(req.auth.userId)));
 app.post("/api/my-device",user,(req,res)=>{
- const model=String(req.body.iphone_model||'').trim().slice(0,100);
- const version=String(req.body.ios_version||'').trim().slice(0,40);
- if(!model||!version)return res.status(400).json({error:"Indica el modelo de iPhone y la versión exacta de iOS."});
- db.prepare("UPDATE users SET iphone_model=?,ios_version=? WHERE id=?").run(model,version,req.auth.userId);
- res.json({ok:true});
+ const model=String(req.body.iphone_model||'').trim(), version=String(req.body.ios_version||'').trim();
+ if(!model||!version)return res.status(400).json({error:'Indica el modelo y la versión exacta de iOS.'});
+ const compatibility=compatibilityFor(version);
+ db.prepare('UPDATE users SET iphone_model=?,ios_version=? WHERE id=?').run(model,version,req.auth.userId);
+ res.json({ok:true,iphone_model:model,ios_version:version,compatibility});
 });
+app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
 app.get("/api/my-products",user,(req,res)=>{
  const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
  CASE WHEN pu.status='delivered' THEN COALESCE(NULLIF(p.ipa_url,''),(SELECT ipa_url FROM category_downloads cd WHERE cd.category=p.category)) ELSE '' END AS ipa_url
@@ -192,19 +221,11 @@ app.post("/api/admin/login",(req,res)=>{
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users ORDER BY id DESC").all(),
- compatibility:db.prepare("SELECT allowed_ranges,blocked_ranges,note FROM compatibility_settings WHERE id=1").get(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
  topups:db.prepare("SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC").all(),
- purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all()
+ purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all(),
+ compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all()
 }));
-app.post("/api/admin/compatibility",admin,(req,res)=>{
- const allowed=String(req.body.allowed_ranges||'').trim();
- const blocked=String(req.body.blocked_ranges||'').trim();
- const note=String(req.body.note||'').trim();
- if(!allowed)return res.status(400).json({error:"Debes indicar al menos un rango compatible."});
- db.prepare("UPDATE compatibility_settings SET allowed_ranges=?,blocked_ranges=?,note=? WHERE id=1").run(allowed,blocked,note);
- res.json({ok:true});
-});
 app.post("/api/admin/topup/:id/approve",admin,(req,res)=>{
  const t=db.prepare("SELECT * FROM topups WHERE id=?").get(req.params.id);
  if(!t||t.status!=="pending")return res.status(400).json({error:"Recarga no disponible."});
@@ -249,6 +270,20 @@ app.post("/api/admin/products/:id",admin,(req,res)=>{
  if(!result.changes)return res.status(404).json({error:"Producto no encontrado."});
  res.json({ok:true});
 });
+app.post('/api/admin/compatibility/:id',admin,(req,res)=>{
+ const id=Number(req.params.id), label=String(req.body.label||'').trim(), min_version=String(req.body.min_version||'').trim(), max_version=String(req.body.max_version||'').trim();
+ const compatible=req.body.compatible?1:0, enabled=req.body.enabled===false?0:1;
+ if(!label||!versionParts(min_version)||!versionParts(max_version))return res.status(400).json({error:'Regla de versión inválida.'});
+ if(compareVersions(min_version,max_version)>0)return res.status(400).json({error:'La versión mínima no puede ser mayor que la máxima.'});
+ const r=db.prepare('UPDATE compatibility_rules SET label=?,min_version=?,max_version=?,compatible=?,enabled=? WHERE id=?').run(label,min_version,max_version,compatible,enabled,id);
+ if(!r.changes)return res.status(404).json({error:'Regla no encontrada.'}); res.json({ok:true});
+});
+app.post('/api/admin/compatibility',admin,(req,res)=>{
+ const label=String(req.body.label||'').trim(), min_version=String(req.body.min_version||'').trim(), max_version=String(req.body.max_version||'').trim(), compatible=req.body.compatible?1:0;
+ if(!label||!versionParts(min_version)||!versionParts(max_version)||compareVersions(min_version,max_version)>0)return res.status(400).json({error:'Datos de compatibilidad inválidos.'});
+ const x=db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)').run(label,min_version,max_version,compatible); res.json({ok:true,id:x.lastInsertRowid});
+});
+
 app.post("/api/admin/users/:id/balance",admin,(req,res)=>{
  const amount=Number(req.body.amount);
  const note=(req.body.note||"Ajuste manual del administrador").trim();
