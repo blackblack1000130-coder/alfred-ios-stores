@@ -28,10 +28,6 @@ for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT
   const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
 }
-for (const [col, type] of [['receipt_mime',"TEXT DEFAULT ''"]]) {
-  const exists = db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === col);
-  if (!exists) db.exec(`ALTER TABLE topups ADD COLUMN ${col} ${type}`);
-}
 for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
@@ -86,13 +82,11 @@ const catalog=[
 ];
 db.prepare("UPDATE products SET active=0 WHERE category='Sensibilidades'").run();
 const findProduct=db.prepare("SELECT id FROM products WHERE name=? AND category=? LIMIT 1");
-const updateProduct=db.prepare("UPDATE products SET price=?,description=?,active=1 WHERE id=?");
 const insertProduct=db.prepare("INSERT INTO products(name,category,price,description,active) VALUES(?,?,?,?,1)");
 db.transaction(()=>{
   for(const [name,category,price,description] of catalog){
     const existing=findProduct.get(name,category);
-    if(existing) updateProduct.run(price,description,existing.id);
-    else insertProduct.run(name,category,price,description);
+    if(!existing) insertProduct.run(name,category,price,description);
   }
 })();
 
@@ -171,13 +165,13 @@ app.get("/api/products",(req,res)=>{
 app.post("/api/register",async(req,res)=>{
  const {name,email,password}=req.body;
  if(!name||!email||!password||password.length<8)return res.status(400).json({error:"Completa los datos. La contraseña debe tener 8 caracteres o más."});
- try{const h=await bcrypt.hash(password,12);const x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name.trim(),email.trim().toLowerCase(),h);setAuth(res,{userId:x.lastInsertRowid,exp:Date.now()+31536000000});res.json({ok:true});}
+ try{const h=await bcrypt.hash(password,12);const x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name.trim(),email.trim().toLowerCase(),h);setAuth(res,{userId:x.lastInsertRowid,exp:Date.now()+2592000000});res.json({ok:true});}
  catch(e){res.status(400).json({error:"Ese correo ya está registrado."});}
 });
 app.post("/api/login",async(req,res)=>{
  const u=db.prepare("SELECT * FROM users WHERE email=?").get((req.body.email||"").toLowerCase());
  if(!u||!(await bcrypt.compare(req.body.password||"",u.password_hash)))return res.status(401).json({error:"Correo o contraseña incorrectos."});
- setAuth(res,{userId:u.id,exp:Date.now()+31536000000});res.json({ok:true});
+ setAuth(res,{userId:u.id,exp:Date.now()+2592000000});res.json({ok:true});
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/me",user,(req,res)=>{
@@ -200,15 +194,11 @@ app.get("/api/my-products",user,(req,res)=>{
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
-app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,status,receipt,receipt_mime,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
+app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
- const receiptExt = path.extname(req.file.originalname||"").toLowerCase() || (req.file.mimetype||"").split("/")[1] ? "." + ((path.extname(req.file.originalname||"").toLowerCase().replace(".","")) || ((req.file.mimetype||"").split("/")[1]||"bin")) : ".bin";
- const receiptName=crypto.randomBytes(8).toString('hex')+receiptExt;
- const receiptTarget=path.join(UPLOAD_DIR,receiptName);
- fs.renameSync(req.file.path,receiptTarget);
- db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime) VALUES(?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+receiptName,req.file.mimetype||"");
+ db.prepare("INSERT INTO topups(user_id,amount,receipt) VALUES(?,?,?)").run(req.auth.userId,amount,"/uploads/"+path.basename(req.file.path));
  res.json({ok:true,message:"Comprobante enviado. Queda pendiente de verificación."});
 });
 app.post("/api/buy",user,(req,res)=>{
@@ -224,7 +214,7 @@ app.post("/api/buy",user,(req,res)=>{
 });
 
 app.post("/api/admin/login",(req,res)=>{
- if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+31536000000});return res.json({ok:true});}
+ if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+2592000000});return res.json({ok:true});}
  res.status(401).json({error:"Credenciales incorrectas."});
 });
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
