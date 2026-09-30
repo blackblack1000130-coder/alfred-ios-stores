@@ -32,6 +32,12 @@ for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TE
   const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
 }
+// La categoría queda congelada en cada compra para que una compra de Filza
+// nunca pueda terminar habilitando la IPA de 3105 o iMazing.
+const purchaseCategoryExists = db.prepare(`PRAGMA table_info(purchases)`).all().some(x => x.name === 'purchase_category');
+if (!purchaseCategoryExists) db.exec(`ALTER TABLE purchases ADD COLUMN purchase_category TEXT DEFAULT ''`);
+db.prepare(`UPDATE purchases SET purchase_category=(SELECT category FROM products WHERE products.id=purchases.product_id) WHERE purchase_category IS NULL OR purchase_category=''`).run();
+
 db.exec(`CREATE TABLE IF NOT EXISTS category_downloads(category TEXT PRIMARY KEY, ipa_url TEXT DEFAULT '', ipa_name TEXT DEFAULT '')`);
 for (const c of ['Filza','3105','iMazing']) db.prepare("INSERT OR IGNORE INTO category_downloads(category) VALUES(?)").run(c);
 const compatCount=db.prepare('SELECT COUNT(*) c FROM compatibility_rules').get().c;
@@ -195,14 +201,14 @@ app.post("/api/my-device",user,(req,res)=>{
 });
 app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
 app.get("/api/my-products",user,(req,res)=>{
- const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
- CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_name FROM category_downloads cd WHERE cd.category=p.category),'') ELSE '' END AS ipa_name,
+ const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,COALESCE(NULLIF(pu.purchase_category,''),p.category) AS category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
+ CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_name FROM category_downloads cd WHERE cd.category=COALESCE(NULLIF(pu.purchase_category,''),p.category)),'') ELSE '' END AS ipa_name,
  CASE WHEN pu.status='delivered' THEN 1 ELSE 0 END AS ipa_enabled
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
 app.get("/api/my-products/:purchaseId/ipa",user,(req,res)=>{
- const purchase=db.prepare(`SELECT pu.id,pu.status,p.category FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.id=? AND pu.user_id=?`).get(Number(req.params.purchaseId),req.auth.userId);
+ const purchase=db.prepare(`SELECT pu.id,pu.status,COALESCE(NULLIF(pu.purchase_category,''),p.category) AS category FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.id=? AND pu.user_id=?`).get(Number(req.params.purchaseId),req.auth.userId);
  if(!purchase) return res.status(404).json({error:'Compra no encontrada.'});
  if(purchase.status!=='delivered') return res.status(403).json({error:'La IPA todavía no está habilitada.'});
  const ipa=db.prepare('SELECT ipa_url,ipa_name FROM category_downloads WHERE category=?').get(purchase.category);
@@ -223,7 +229,7 @@ app.post("/api/buy",user,(req,res)=>{
  if(u.balance<p.price)return res.status(400).json({error:"Saldo insuficiente. Agrega saldo primero."});
  db.transaction(()=>{
    db.prepare("UPDATE users SET balance=balance-? WHERE id=?").run(p.price,req.auth.userId);
-   db.prepare("INSERT INTO purchases(user_id,product_id,price) VALUES(?,?,?)").run(req.auth.userId,p.id,p.price);
+   db.prepare("INSERT INTO purchases(user_id,product_id,price,purchase_category) VALUES(?,?,?,?)").run(req.auth.userId,p.id,p.price,p.category);
  })();
  res.json({ok:true,message:"Compra realizada. La entrega puede tardar de 1 a 2 horas."});
 });
