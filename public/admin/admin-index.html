@@ -1,0 +1,160 @@
+<!doctype html><html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALFRED IOS STORES — Admin</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#050b18;color:#fff;font-family:Inter,system-ui,sans-serif}button,input,textarea{font:inherit}
+.login{min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 10%,#123b73,transparent 45%),#050b18}
+.loginbox{width:min(430px,100%);background:#09172b;border:1px solid #28598a;border-radius:20px;padding:28px;box-shadow:0 20px 70px #0008}.loginbox h1{margin-top:0}.loginbox span{color:#39a9ff}
+.loginbox input{width:100%;margin:7px 0 13px;padding:13px;border-radius:10px;border:1px solid #294b70;background:#071326;color:#fff}.primary{width:100%;padding:13px;border:0;border-radius:10px;background:#168cff;color:#fff;font-weight:900}.err{color:#ff8585;min-height:22px;margin-top:10px}
+.app{display:none}.layout{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.side{position:fixed;width:250px;top:0;bottom:0;background:#071225;border-right:1px solid #1b3b62;padding:24px 15px}.logo{font-weight:900;font-size:19px;padding:5px 12px 28px}.logo span{color:#39a9ff}.menu{display:grid;gap:7px}.menu button{background:transparent;color:#9eb5d0;border:1px solid transparent;padding:13px;border-radius:12px;text-align:left;font-weight:800;cursor:pointer}.menu button.active,.menu button:hover{background:#0e2949;color:#fff;border-color:#22558a}
+.content{grid-column:2;padding:28px 4%;max-width:1500px;width:100%;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.top h1{margin:0}.top button{background:#122b48;color:#fff;border:0;border-radius:10px;padding:10px 14px}.muted{color:#8fa8c4}
+.section{display:none}.section.active{display:block}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.stat,.panel,.card{background:#09172b;border:1px solid #1d416c;border-radius:17px;padding:18px}.stat b{display:block;font-size:30px;margin-top:6px}.split{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:15px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{padding:0;overflow:hidden}.thumb{height:165px;background:#0b2240;display:flex;align-items:center;justify-content:center}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:15px}.actions{display:flex;gap:8px;margin-top:12px}.actions button,.row button{border:0;border-radius:9px;padding:10px 12px;font-weight:800;cursor:pointer}.edit{background:#168cff;color:#fff}.dark{background:#112a47;color:#cce4ff}.list{display:grid;gap:10px}.row{background:#09172b;border:1px solid #1d416c;border-radius:13px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:10px}.row form{display:flex;gap:7px}.row input{width:110px;padding:9px;background:#071326;color:#fff;border:1px solid #294b70;border-radius:8px}
+.modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:15px;z-index:20}.modal.show{display:flex}.box{width:min(650px,100%);max-height:92vh;overflow:auto;background:#09172b;border:1px solid #2b6096;border-radius:18px;padding:20px}.close{float:right;background:#18304d;color:#fff;border:0;border-radius:8px;padding:8px;cursor:pointer}.box input[type=text],.box input[type=number],.box textarea{width:100%;padding:11px;margin:6px 0 12px;background:#071326;color:#fff;border:1px solid #294b70;border-radius:9px}.filebox{border:1px dashed #3876ae;border-radius:12px;padding:13px;margin:8px 0 14px;background:#071326}.filebox input{width:100%;margin-top:8px;color:#cfe7ff}.preview{display:none;width:100%;max-height:190px;object-fit:contain;border-radius:10px;margin-top:8px;background:#030913}.status{font-size:13px;color:#8ecbff;min-height:18px;margin-top:6px}.save{width:100%;padding:13px;border:0;border-radius:10px;background:#168cff;color:#fff;font-weight:900}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:700px){.layout{display:block}.side{position:sticky;width:100%;height:auto;padding:10px;z-index:10}.logo{padding:5px 10px 10px}.menu{display:flex;overflow:auto}.menu button{white-space:nowrap}.content{padding:18px 14px}.stats,.split,.grid{grid-template-columns:1fr 1fr}}@media(max-width:450px){.stats,.split,.grid{grid-template-columns:1fr}.row{flex-direction:column;align-items:flex-start}.row form{width:100%}}
+</style></head><body>
+
+<div id="login" class="login"><form class="loginbox" onsubmit="login(event)">
+<h1>ALFRED <span>IOS STORES</span></h1><p class="muted">Panel de administración</p>
+<label>Correo</label><input id="email" type="email" autocomplete="username" required>
+<label>Contraseña</label><input id="password" type="password" autocomplete="current-password" required>
+<button class="primary">Entrar al panel</button><div id="err" class="err"></div>
+</form></div>
+
+<div id="app" class="app"><div class="layout"><aside class="side"><div class="logo">ALFRED <span>IOS STORES</span></div><nav class="menu">
+<button class="active" onclick="show('home',this)">📊 Inicio</button><button onclick="show('products',this)">📦 Productos</button><button onclick="show('users',this)">👥 Clientes</button><button onclick="show('topups',this)">💳 Recargas</button><button onclick="show('orders',this)">🛒 Pedidos</button><button onclick="show('ledger',this)">📒 Movimientos</button><button onclick="logout()">🚪 Cerrar sesión</button><button onclick="location.href='/'">🌐 Ver tienda</button>
+</nav></aside><main class="content"><div class="top"><div><h1 id="heading">Resumen</h1><div class="muted">Panel de control</div></div><button onclick="location.href='/'">Tienda</button></div>
+<section id="home" class="section active"><div class="stats"><div class="stat">Clientes<b id="susers">0</b></div><div class="stat">Productos<b id="sproducts">0</b></div><div class="stat">Ventas<b id="ssales">0</b></div></div><div class="split"><div class="panel">💳 Recargas pendientes <b id="stopups">0</b></div><div class="panel">🛒 Pedidos pendientes <b id="sorders">0</b></div></div></section>
+<section id="products" class="section"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><h2>Productos</h2><button class="edit" style="border:0;border-radius:9px;padding:10px 13px;font-weight:800" onclick="newProduct()">＋ Nuevo</button></div><div id="grid" class="grid"></div></section>
+<section id="users" class="section"><div id="userslist" class="list"></div></section><section id="topups" class="section"><div id="topupslist" class="list"></div></section><section id="orders" class="section"><div id="orderslist" class="list"></div></section><section id="ledger" class="section"><div id="ledgerlist" class="list"></div></section>
+</main></div></div>
+
+<div id="modal" class="modal"><div class="box"><button class="close" onclick="closeModal()">Cerrar</button><h2 id="modalTitle">Producto</h2><input id="pid" type="hidden"><label>Nombre</label><input id="name" type="text"><label>Categoría</label><input id="category" type="text"><label>Precio</label><input id="price" type="number" min="0"><label>Descripción</label><textarea id="desc" rows="3"></textarea>
+<div class="filebox"><b>📷 Imagen desde Fotos/Galería</b><input id="imageFile" type="file" accept="image/*" onchange="previewImage(this)"><img id="imagePreview" class="preview"><div id="imageStatus" class="status"></div></div>
+<div class="filebox"><b>🎥 Video desde Fotos/Galería</b><input id="videoFile" type="file" accept="video/*" onchange="previewVideo(this)"><video id="videoPreview" class="preview" controls></video><div id="videoStatus" class="status"></div></div>
+<label>MediaFire</label><input id="mediafire" type="text"><label><input id="active" type="checkbox" style="width:auto"> Activo</label><button class="save" onclick="saveProduct()">Guardar cambios</button></div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const refs = {
+  login: $('login'), app: $('app'), email: $('email'), password: $('password'), err: $('err'),
+  heading: $('heading'), susers: $('susers'), sproducts: $('sproducts'), ssales: $('ssales'), stopups: $('stopups'), sorders: $('sorders'),
+  grid: $('grid'), userslist: $('userslist'), topupslist: $('topupslist'), orderslist: $('orderslist'), ledgerlist: $('ledgerlist'),
+  modal: $('modal'), modalTitle: $('modalTitle'), pid: $('pid'), name: $('name'), category: $('category'), price: $('price'), desc: $('desc'),
+  imageFile: $('imageFile'), imagePreview: $('imagePreview'), imageStatus: $('imageStatus'), videoFile: $('videoFile'), videoPreview: $('videoPreview'),
+  videoStatus: $('videoStatus'), mediafire: $('mediafire'), active: $('active')
+};
+let data={products:[],users:[],topups:[],purchases:[]};
+let editing=null, oldImage='', oldVideo='';
+
+async function api(url,opt={}){
+  const r=await fetch(url,opt);
+  if(!r.ok){let e={};try{e=await r.json()}catch(_){ }throw new Error(e.error||'Error del servidor')}
+  return r.json();
+}
+
+async function boot(){
+  try{
+    data=await api('/api/admin/data',{cache:'no-store'});
+    refs.login.style.display='none';
+    refs.app.style.display='block';
+    draw();
+  }catch(e){
+    refs.login.style.display='grid';
+    refs.app.style.display='none';
+  }
+}
+
+async function login(e){
+  e.preventDefault();
+  refs.err.textContent='';
+  try{
+    await api('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:refs.email.value.trim(),password:refs.password.value})});
+    await boot();
+  }catch(x){refs.err.textContent=x.message;}
+}
+
+async function logout(){await fetch('/api/admin/logout',{method:'POST'});location.reload();}
+
+function show(id,b){
+  document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+  const section=$(id); if(section)section.classList.add('active');
+  document.querySelectorAll('.menu button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  refs.heading.textContent=b.textContent.replace(/^\S+\s/,'');
+}
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function mediaUrl(url,id){if(!url)return '';const sep=url.includes('?')?'&':'?';return url+sep+'v='+encodeURIComponent(String(id)+'-'+Date.now());}
+
+function draw(){
+  const p=data.products||[],u=data.users||[],t=data.topups||[],o=data.purchases||[];
+  refs.susers.textContent=u.length; refs.sproducts.textContent=p.length;
+  refs.ssales.textContent=o.length; refs.stopups.textContent=t.filter(x=>x.status==='pending').length; refs.sorders.textContent=o.filter(x=>x.status!=='delivered').length;
+  refs.grid.innerHTML=p.map(x=>`<article class="card"><div class="thumb">${x.image?`<img src="${esc(mediaUrl(x.image,x.id))}" alt="${esc(x.name)}">`:'📱'}</div><div class="cardbody"><h3>${esc(x.name)}</h3><div class="muted">${esc(x.category)}</div><h3>RD$${Number(x.price).toLocaleString('es-DO')}</h3><div class="actions"><button class="edit" onclick="editProduct(${Number(x.id)})">✏️ Editar</button><button class="dark" onclick="toggle(${Number(x.id)},${x.active?0:1})">${x.active?'Desactivar':'Activar'}</button></div></div></article>`).join('');
+  refs.userslist.innerHTML=u.map(x=>`<div class="row"><div><b>${esc(x.email)}</b><div class="muted">Saldo: RD$${Number(x.balance).toLocaleString('es-DO')}</div></div><form onsubmit="balance(event,${Number(x.id)})"><input type="number" min="1" placeholder="Monto"><button>+ Saldo</button></form></div>`).join('');
+  refs.topupslist.innerHTML=t.map(x=>`<div class="row"><div><b>RD$${Number(x.amount).toLocaleString('es-DO')}</b><div class="muted">${esc(x.email)} · ${esc(x.status)}</div>${x.receipt?`<a href="${esc(x.receipt)}" target="_blank" style="color:#6abaff">Ver comprobante</a>`:''}</div>${x.status==='pending'?`<div><button onclick="topup(${Number(x.id)},'approve')">Aprobar</button> <button onclick="topup(${Number(x.id)},'reject')">Rechazar</button></div>`:''}</div>`).join('');
+  refs.orderslist.innerHTML=o.map(x=>`<div class="row"><div><b>Pedido #${Number(x.id)}</b><div class="muted">${esc(x.email)} · ${esc(x.product_name)} · RD$${Number(x.price).toLocaleString('es-DO')} · ${esc(x.status)}</div></div>${x.status!=='delivered'?`<button onclick="deliver(${Number(x.id)})">Marcar entregado</button>`:''}</div>`).join('');
+  refs.ledgerlist.innerHTML=o.map(x=>`<div class="row"><div><b>Pedido #${Number(x.id)}</b><div class="muted">${esc(x.email)} · ${esc(x.created_at)}</div></div><b>RD$-${Number(x.price).toLocaleString('es-DO')}</b></div>`).join('');
+}
+
+function resetFiles(){
+  refs.imageFile.value=''; refs.videoFile.value=''; refs.imagePreview.style.display='none'; refs.videoPreview.style.display='none';
+  refs.imagePreview.removeAttribute('src'); refs.videoPreview.removeAttribute('src'); refs.imageStatus.textContent=''; refs.videoStatus.textContent='';
+}
+
+function newProduct(){
+  editing=null; oldImage=''; oldVideo=''; refs.modalTitle.textContent='Nuevo producto'; refs.pid.value=''; refs.name.value=''; refs.category.value='Sensibilidades'; refs.price.value=''; refs.desc.value=''; refs.mediafire.value=''; refs.active.checked=true; resetFiles(); refs.modal.classList.add('show');
+}
+
+function editProduct(id){
+  const x=data.products.find(p=>Number(p.id)===Number(id));
+  if(!x)return alert('Producto no encontrado.');
+  editing=Number(id); oldImage=x.image||''; oldVideo=x.video||''; refs.modalTitle.textContent='Editar producto'; refs.pid.value=String(x.id);
+  refs.name.value=x.name||''; refs.category.value=x.category||''; refs.price.value=x.price??''; refs.desc.value=x.description||''; refs.mediafire.value=x.mediafire_url||''; refs.active.checked=!!x.active; resetFiles();
+  if(oldImage){refs.imagePreview.src=mediaUrl(oldImage,x.id);refs.imagePreview.style.display='block';}
+  if(oldVideo){refs.videoPreview.src=mediaUrl(oldVideo,x.id);refs.videoPreview.style.display='block';}
+  refs.modal.classList.add('show');
+}
+
+function closeModal(){refs.modal.classList.remove('show');}
+function previewImage(input){const f=input.files&&input.files[0];if(!f)return;refs.imagePreview.src=URL.createObjectURL(f);refs.imagePreview.style.display='block';refs.imageStatus.textContent=f.name;}
+function previewVideo(input){const f=input.files&&input.files[0];if(!f)return;refs.videoPreview.src=URL.createObjectURL(f);refs.videoPreview.style.display='block';refs.videoStatus.textContent=f.name;}
+
+async function uploadMedia(input,status){
+  const f=input.files&&input.files[0]; if(!f)return null;
+  if(f.size>50*1024*1024)throw new Error('El archivo no puede superar 50 MB.');
+  status.textContent='Subiendo...';
+  const fd=new FormData(); fd.append('file',f);
+  const x=await api('/api/admin/upload-media',{method:'POST',body:fd});
+  status.textContent='✓ Subido'; return x.url;
+}
+
+async function saveProduct(){
+  try{
+    const productName=refs.name.value.trim();
+    const productCategory=refs.category.value.trim();
+    const productPrice=Number(refs.price.value);
+    if(!productName)throw new Error('Escribe el nombre del producto.');
+    if(!productCategory)throw new Error('Escribe la categoría.');
+    if(!Number.isFinite(productPrice)||productPrice<0)throw new Error('Indica un precio válido.');
+    let image=oldImage,video=oldVideo;
+    if(refs.imageFile.files&&refs.imageFile.files[0]) image=await uploadMedia(refs.imageFile,refs.imageStatus);
+    if(refs.videoFile.files&&refs.videoFile.files[0]) video=await uploadMedia(refs.videoFile,refs.videoStatus);
+    const body={name:productName,category:productCategory,price:Math.round(productPrice),description:refs.desc.value.trim(),image:image||'',video:video||'',mediafire_url:refs.mediafire.value.trim(),active:refs.active.checked?1:0};
+    const url=editing?'/api/admin/products/'+encodeURIComponent(editing):'/api/admin/products';
+    await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    closeModal(); await boot();
+  }catch(e){alert(e.message);}
+}
+
+async function toggle(id,a){
+  const x=data.products.find(p=>Number(p.id)===Number(id)); if(!x)return;
+  await api('/api/admin/products/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...x,price:Number(x.price),active:a})});
+  await boot();
+}
+async function balance(e,id){e.preventDefault();const n=e.target.querySelector('input').value;if(n)await api('/api/admin/users/'+encodeURIComponent(id)+'/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:Number(n)})});await boot();}
+async function topup(id,a){await api('/api/admin/topup/'+encodeURIComponent(id)+'/'+(a==='approve'?'approve':'reject'),{method:'POST'});await boot();}
+async function deliver(id){await api('/api/admin/purchase/'+encodeURIComponent(id)+'/deliver',{method:'POST'});await boot();}
+
+boot();
+</script></body></html>
