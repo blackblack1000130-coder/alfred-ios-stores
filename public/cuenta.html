@@ -7,11 +7,12 @@ async function load(){
  document.getElementById('products').innerHTML=p.length?p.map(x=>{
    const delivered=x.status==='delivered';
    return '<div class="item"><b>'+esc(x.name)+'</b><div class="muted">Categoría: '+esc(x.category)+' · Estado: '+esc(x.status)+'</div>'+
+   (delivered ? '<div style="margin-top:8px;color:#8fdcff">📲 La IPA entregada corresponde únicamente a la categoría '+esc(x.category)+'.</div>' : '')+
    (delivered ?
     '<div style="margin-top:10px;display:grid;gap:8px">'+
       (x.mega_url?'<a class="btn" href="'+esc(x.mega_url)+'" target="_blank" rel="noopener">📦 Descargar archivo de Mega</a>':'')+
       (x.file_password?'<div style="background:#06101a;border:1px solid #294b62;padding:12px;border-radius:9px"><b>🔐 Contraseña:</b> <code>'+esc(x.file_password)+'</code></div>':'')+
-      (x.ipa_url?'<a class="btn" href="'+esc(x.ipa_url)+'" target="_blank" rel="noopener">📲 Descargar IPA de '+esc(x.category)+'</a>':'')+
+      (x.ipa_url?'<a class="btn" href="'+esc(x.ipa_url)+'" target="_blank" rel="noopener">📲 Descargar '+esc(x.ipa_name||('IPA '+x.category))+'</a>':'')+
       (x.mediafire_url?'<a class="btn" href="'+esc(x.mediafire_url)+'" target="_blank" rel="noopener">📥 Descargar enlace alternativo</a>':'')+
     '</div>' : '<br><span class="muted">Pendiente de entrega. Las descargas y la contraseña aparecerán cuando el pedido sea marcado como entregado.</span>')+'</div>'
  }).join(''):'<span class="muted">No tienes compras todavía.</span>';
