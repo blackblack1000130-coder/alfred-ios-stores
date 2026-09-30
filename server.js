@@ -42,7 +42,12 @@ if(!compatCount){
   ins.run('iOS 18.7.1 → 18.7.10','18.7.1','18.7.10',0);
   ins.run('iOS 26.0.1 → 26.6.2','26.0.1','26.6.2',1);
   ins.run('iOS 27.0.0 beta 1 → beta 6','27.0.0 beta 1','27.0.0 beta 6',1);
+  ins.run('iOS 27.0.0 estable','27.0.0','27.0.0',1);
  })();
+}
+// Si ya existía una base de datos anterior, asegura también la regla de iOS 27.0.0 estable.
+if(!db.prepare("SELECT 1 FROM compatibility_rules WHERE min_version='27.0.0' AND max_version='27.0.0'").get()) {
+ db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)').run('iOS 27.0.0 estable','27.0.0','27.0.0',1);
 }
 
 const initial=[
