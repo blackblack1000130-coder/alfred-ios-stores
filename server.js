@@ -196,10 +196,18 @@ app.post("/api/my-device",user,(req,res)=>{
 app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
 app.get("/api/my-products",user,(req,res)=>{
  const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
- CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_url FROM category_downloads cd WHERE cd.category=p.category),'') ELSE '' END AS ipa_url,
- CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_name FROM category_downloads cd WHERE cd.category=p.category),'') ELSE '' END AS ipa_name
+ CASE WHEN pu.status='delivered' THEN COALESCE((SELECT cd.ipa_name FROM category_downloads cd WHERE cd.category=p.category),'') ELSE '' END AS ipa_name,
+ CASE WHEN pu.status='delivered' THEN 1 ELSE 0 END AS ipa_enabled
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
+});
+app.get("/api/my-products/:purchaseId/ipa",user,(req,res)=>{
+ const purchase=db.prepare(`SELECT pu.id,pu.status,p.category FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.id=? AND pu.user_id=?`).get(Number(req.params.purchaseId),req.auth.userId);
+ if(!purchase) return res.status(404).json({error:'Compra no encontrada.'});
+ if(purchase.status!=='delivered') return res.status(403).json({error:'La IPA todavía no está habilitada.'});
+ const ipa=db.prepare('SELECT ipa_url,ipa_name FROM category_downloads WHERE category=?').get(purchase.category);
+ if(!ipa || !ipa.ipa_url) return res.status(404).json({error:'La IPA de esta categoría todavía no ha sido configurada.'});
+ res.json({ok:true,category:purchase.category,ipa_url:ipa.ipa_url,ipa_name:ipa.ipa_name||('IPA '+purchase.category)});
 });
 app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
