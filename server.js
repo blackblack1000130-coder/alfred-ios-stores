@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS compatibility_rules(id INTEGER PRIMARY KEY AUTOINCREM
 `);
 
 // Campos de entrega digital. Se agregan sin borrar datos existentes.
-for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"]]) {
+for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"],['file_url',"TEXT DEFAULT ''"],['file_name',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
 }
@@ -155,11 +155,21 @@ function compatibilityFor(version){
 
 app.get("/api/health",(req,res)=>{try{db.prepare("SELECT 1").get();res.json({ok:true});}catch(e){console.error("HEALTH_ERROR",e);res.status(500).json({ok:false});}});
 
-app.get("/api/settings",(req,res)=>res.json({
- payment_method:"Banreservas",payment_account:"9605206264",
- delivery_notice:"La entrega puede tardar de 1 a 2 horas.",
- compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel."
-}));
+const DEFAULT_SETTINGS={
+ payment_method:"Banreservas",payment_account:"9605206264",delivery_notice:"La entrega puede tardar de 1 a 2 horas.",
+ compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel.",
+ whatsapp_channel:"https://whatsapp.com/channel/0029VbB1aAQDp2Q5F3dUDH3S",
+ whatsapp_support:"https://wa.me/message/YXZINHSERCDNP1"
+};
+for(const [k,v] of Object.entries(DEFAULT_SETTINGS)) db.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").run(k,v);
+function getSettings(){const out={...DEFAULT_SETTINGS};for(const r of db.prepare("SELECT key,value FROM settings").all())out[r.key]=r.value;return out;}
+app.get("/api/settings",(req,res)=>res.json(getSettings()));
+app.post("/api/admin/settings",admin,(req,res)=>{
+ const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel'];
+ const up=db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+ for(const k of allowed){if(req.body&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
+ res.json({ok:true,settings:getSettings()});
+});
 
 app.get("/api/products",(req,res)=>{
  const c=req.query.category;
@@ -213,7 +223,7 @@ app.post("/api/my-device",user,(req,res)=>{
 });
 app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compatibility_rules WHERE enabled=1 ORDER BY id').all()));
 app.get("/api/my-products",user,(req,res)=>{
- const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.image,p.video,
+ const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.file_url,p.file_name,p.image,p.video,
  CASE WHEN pu.status='delivered' THEN (SELECT ipa_url FROM category_downloads cd WHERE cd.category=p.category) ELSE '' END AS ipa_url,
 (SELECT ipa_name FROM category_downloads cd WHERE cd.category=p.category) AS ipa_name
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
@@ -269,28 +279,34 @@ app.post("/api/admin/upload-file",admin,upload.single("file"),(req,res)=>{
  const ext=path.extname(req.file.originalname||"").toLowerCase();
  const allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];
  if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"Tipo de archivo no permitido. Usa IPA, ZIP, RAR, 7Z, PDF o DMG."});}
- const target=path.join(UPLOAD_DIR,crypto.randomBytes(8).toString('hex')+ext);
+ const original=path.basename(req.file.originalname||('archivo'+ext));
+ const safeName=original.replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\s+/g,' ').trim() || ('archivo'+ext);
+ let target=path.join(UPLOAD_DIR,safeName);
+ if(fs.existsSync(target)){
+   const base=path.basename(safeName,ext), stamp=Date.now();
+   target=path.join(UPLOAD_DIR,`${base}-${stamp}${ext}`);
+ }
  fs.renameSync(req.file.path,target);
- res.json({ok:true,url:"/uploads/"+path.basename(target)});
+ res.json({ok:true,url:"/uploads/"+path.basename(target),name:path.basename(target)});
 });
 app.post("/api/admin/category-downloads",admin,(req,res)=>{
  const category=String(req.body.category||'').trim();
  const ipa_url=String(req.body.ipa_url||'').trim();
- const ipa_name=String(req.body.ipa_name||'').trim();
+ const ipa_name=String(req.body.ipa_name||'').trim() || category+' IPA';
  if(!['Filza','3105','iMazing'].includes(category)) return res.status(400).json({error:"Categoría no válida."});
  db.prepare("INSERT INTO category_downloads(category,ipa_url,ipa_name) VALUES(?,?,?) ON CONFLICT(category) DO UPDATE SET ipa_url=excluded.ipa_url,ipa_name=excluded.ipa_name").run(category,ipa_url,ipa_name);
  res.json({ok:true});
 });
 app.post("/api/admin/products",admin,(req,res)=>{
- const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url}=req.body;
+ const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,file_url,file_name}=req.body;
  if(!name||!category||!Number.isInteger(Number(price)))return res.status(400).json({error:"Datos inválidos."});
- const x=db.prepare("INSERT INTO products(name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url) VALUES(?,?,?,?,?,?,?,?,?,?)").run(name,category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"");
+ const x=db.prepare("INSERT INTO products(name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,file_url,file_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(name,category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"",file_url||"",file_name||"");
  res.json({ok:true,id:x.lastInsertRowid});
 });
 app.post("/api/admin/products/:id",admin,(req,res)=>{
- const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,active}=req.body;
+ const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,file_url,file_name,active}=req.body;
  if(!name||!category||!Number.isInteger(Number(price))||Number(price)<0)return res.status(400).json({error:"Datos inválidos."});
- const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,mega_url=?,file_password=?,ipa_url=?,active=? WHERE id=?").run(name.trim(),category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"",active?1:0,req.params.id);
+ const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,mega_url=?,file_password=?,ipa_url=?,file_url=?,file_name=?,active=? WHERE id=?").run(name.trim(),category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"",file_url||"",file_name||"",active?1:0,req.params.id);
  if(!result.changes)return res.status(404).json({error:"Producto no encontrado."});
  res.json({ok:true});
 });
@@ -309,16 +325,19 @@ app.post('/api/admin/compatibility',admin,(req,res)=>{
 });
 
 app.post("/api/admin/users/:id/balance",admin,(req,res)=>{
- const amount=Number(req.body.amount);
+ const mode=String(req.body.mode||'add');
+ const value=Number(req.body.amount);
  const note=(req.body.note||"Ajuste manual del administrador").trim();
- if(!Number.isInteger(amount)||amount<1)return res.status(400).json({error:"El monto debe ser un número entero mayor que 0."});
- const u=db.prepare("SELECT id FROM users WHERE id=?").get(req.params.id);
+ if(!Number.isInteger(value)||value<0)return res.status(400).json({error:"El saldo debe ser un número entero mayor o igual a 0."});
+ const u=db.prepare("SELECT id,balance FROM users WHERE id=?").get(req.params.id);
  if(!u)return res.status(404).json({error:"Cliente no encontrado."});
+ const delta=mode==='set'?value-u.balance:value;
  db.transaction(()=>{
-   db.prepare("UPDATE users SET balance=balance+? WHERE id=?").run(amount,u.id);
-   db.prepare("INSERT INTO balance_adjustments(user_id,amount,note) VALUES(?,?,?)").run(u.id,amount,note);
+   if(mode==='set') db.prepare("UPDATE users SET balance=? WHERE id=?").run(value,u.id);
+   else db.prepare("UPDATE users SET balance=balance+? WHERE id=?").run(value,u.id);
+   if(delta!==0) db.prepare("INSERT INTO balance_adjustments(user_id,amount,note) VALUES(?,?,?)").run(u.id,delta,note);
  })();
- res.json({ok:true});
+ res.json({ok:true,balance:mode==='set'?value:u.balance+value});
 });
 
 app.listen(PORT,()=>console.log("ALFRED IOS STORES en puerto "+PORT));
