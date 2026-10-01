@@ -252,9 +252,9 @@ app.post("/api/buy",user,(req,res)=>{
  if(u.balance<p.price)return res.status(400).json({error:"Saldo insuficiente. Agrega saldo primero."});
  db.transaction(()=>{
    db.prepare("UPDATE users SET balance=balance-? WHERE id=?").run(p.price,req.auth.userId);
-   db.prepare("INSERT INTO purchases(user_id,product_id,price) VALUES(?,?,?)").run(req.auth.userId,p.id,p.price);
+   db.prepare("INSERT INTO purchases(user_id,product_id,price,status) VALUES(?,?,?,'delivered')").run(req.auth.userId,p.id,p.price);
  })();
- res.json({ok:true,message:"Compra realizada. La entrega puede tardar de 1 a 2 horas."});
+ res.json({ok:true,message:"Compra realizada. Tus archivos ya están disponibles en tu cuenta.",delivered:true});
 });
 
 app.post("/api/admin/login",(req,res)=>{
