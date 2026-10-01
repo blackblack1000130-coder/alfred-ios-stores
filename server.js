@@ -298,7 +298,8 @@ app.post("/api/register",async(req,res)=>{
  }
 });
 app.post("/api/login",async(req,res)=>{
- const u=db.prepare("SELECT * FROM users WHERE email=?").get((req.body.email||"").toLowerCase());
+ const loginEmail=String(req.body?.email||"").trim().toLowerCase();
+ const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(loginEmail);
  if(!u||!(await bcrypt.compare(req.body.password||"",u.password_hash)))return res.status(401).json({error:"Correo o contraseña incorrectos."});
  setAuth(res,{userId:u.id,exp:Date.now()+31536000000});res.json({ok:true});
 });
