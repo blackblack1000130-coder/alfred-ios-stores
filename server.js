@@ -169,7 +169,7 @@ for(const [k,v] of Object.entries(DEFAULT_SETTINGS)) db.prepare("INSERT OR IGNOR
 function getSettings(){const out={...DEFAULT_SETTINGS};for(const r of db.prepare("SELECT key,value FROM settings").all())out[r.key]=r.value;return out;}
 app.get("/api/settings",(req,res)=>res.json(getSettings()));
 app.post("/api/admin/settings",admin,(req,res)=>{
- const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel'];
+ const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel','category_image_Filza','category_image_3105','category_image_iMazing','category_image_Premium','category_image_Otros'];
  const up=db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
  for(const k of allowed){if(req.body&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
  res.json({ok:true,settings:getSettings()});
