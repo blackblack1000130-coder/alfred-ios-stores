@@ -8,7 +8,8 @@ const Database=require("better-sqlite3");
 
 const app=express();
 const PORT=process.env.PORT||10000;
-const DB_PATH=process.env.DB_PATH||path.join(__dirname,"data","store.db");
+const DATA_ROOT=process.env.RAILWAY_VOLUME_MOUNT_PATH||path.join(__dirname,"data");
+const DB_PATH=process.env.DB_PATH||path.join(DATA_ROOT,"store.db");
 const ADMIN_EMAIL=process.env.ADMIN_EMAIL||"Blackblack1000130@gmail.com";
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"CAMBIAR_ESTA_CLAVE";
 fs.mkdirSync(path.dirname(DB_PATH),{recursive:true});
@@ -126,7 +127,7 @@ function clearAuth(res){res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=/; Htt
 app.use((req,res,next)=>{req.auth=readAuth(req);next();});
 app.use(express.static(path.join(__dirname,"public")));
 
-const UPLOAD_DIR=process.env.UPLOAD_DIR||path.join(__dirname,"data","uploads");
+const UPLOAD_DIR=process.env.UPLOAD_DIR||path.join(DATA_ROOT,"uploads");
 fs.mkdirSync(UPLOAD_DIR,{recursive:true});
 app.use("/uploads",express.static(UPLOAD_DIR));
 const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
@@ -230,7 +231,7 @@ app.get("/api/my-products",user,(req,res)=>{
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
-app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
+app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,receipt,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
