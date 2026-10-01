@@ -31,6 +31,8 @@ for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT
   const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
 }
+// Compatibilidad con bases de datos creadas por versiones anteriores.
+{ const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'receipt_mime'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN receipt_mime TEXT DEFAULT ''`); }
 for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
@@ -231,11 +233,16 @@ app.get("/api/my-products",user,(req,res)=>{
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
-app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,receipt,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
+app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,receipt,receipt_mime,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
- db.prepare("INSERT INTO topups(user_id,amount,receipt) VALUES(?,?,?)").run(req.auth.userId,amount,"/uploads/"+path.basename(req.file.path));
+ const ext=path.extname(req.file.originalname||"").toLowerCase();
+ const safeBase=(path.basename(req.file.originalname||"comprobante",ext).replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\s+/g,' ').trim()||'comprobante');
+ const finalName=`comprobante-${Date.now()}-${safeBase}${ext||''}`;
+ const finalPath=path.join(UPLOAD_DIR,finalName);
+ fs.renameSync(req.file.path,finalPath);
+ db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime) VALUES(?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+finalName,req.file.mimetype||"");
  res.json({ok:true,message:"Comprobante enviado. Queda pendiente de verificación."});
 });
 app.post("/api/buy",user,(req,res)=>{
