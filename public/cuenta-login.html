@@ -1,26 +1,84 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cuenta</title><style>body{margin:0;background:#040910;color:white;font-family:Arial}.box{max-width:430px;margin:55px auto;padding:25px;background:#0d1722;border:1px solid #23445d;border-radius:18px}input{width:100%;padding:13px;margin:7px 0;background:#06101a;color:#fff;border:1px solid #2a4b63;border-radius:9px}button{padding:12px 16px;border:0;border-radius:9px;background:#0789ff;color:#fff;font-weight:bold}.tab{margin-right:7px}.msg{color:#8fa4b6}.bottom-back{display:block;margin:18px auto 0;padding:10px 16px;border:1px solid #2b668b;border-radius:11px;background:#071a2a;color:#d9efff;font-weight:900;cursor:pointer;font:inherit}</style></head><body><div class="box"><h1>ALFRED IOS STORES</h1><button class="tab" onclick="mode('login')">Entrar</button><button class="tab" onclick="mode('reg')">Crear cuenta</button><form id="login"><input id="le" type="email" placeholder="Correo" required><input id="lp" type="password" placeholder="Contraseña" required><button>Iniciar sesión</button></form><button class="bottom-back" type="button" onclick="history.length>1?history.back():location.href='/'">← Volver atrás</button><form id="reg" style="display:none"><input id="rn" placeholder="Nombre" required><input id="re" type="email" placeholder="Correo" required><input id="rp" type="password" placeholder="Contraseña (8+)" required><button>Crear cuenta</button></form><p id="msg" class="msg"></p><a href="/" style="color:#55c7ff">← Tienda</a></div><script>
-const $=id=>document.getElementById(id);
-const msg=$('msg');
-function mode(x){$('login').style.display=x==='login'?'block':'none';$('reg').style.display=x==='reg'?'block':'none';msg.textContent='';}
-async function jsonFetch(url,options){
-  try{
-    const r=await fetch(url,options);
-    const text=await r.text();
-    let j={}; try{j=text?JSON.parse(text):{}}catch(e){j={error:'El servidor devolvió una respuesta no válida.'}}
-    return {r,j};
-  }catch(e){return {r:{ok:false,status:0},j:{error:'No se pudo conectar con la tienda. Inténtalo nuevamente.'}};}
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<title>Acceder | ALFRED IOS STORE</title>
+<style>
+:root{--gold:#f4c64e;--gold2:#ffd96a;--bg:#050505;--panel:rgba(17,17,17,.92);--line:rgba(244,198,78,.22);--muted:#9b9b9b;--white:#fff}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% -10%,rgba(244,198,78,.14),transparent 34%),linear-gradient(145deg,#020202,#0a0a0a 55%,#020202);color:var(--white);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow-x:hidden}
+body:before,body:after{content:"";position:fixed;pointer-events:none;border-radius:50%;filter:blur(2px);opacity:.5}
+body:before{width:420px;height:420px;left:-260px;top:-180px;border:1px solid rgba(244,198,78,.22);box-shadow:0 0 90px rgba(244,198,78,.08)}
+body:after{width:360px;height:360px;right:-250px;bottom:-220px;border:1px solid rgba(244,198,78,.16)}
+.shell{width:min(100%,430px);position:relative}
+.brand{text-align:center;margin-bottom:18px}
+.brand-mark{width:66px;height:66px;margin:0 auto 12px;border-radius:21px;display:grid;place-items:center;border:1px solid rgba(244,198,78,.45);background:linear-gradient(145deg,#1c1a12,#080808);box-shadow:0 12px 40px rgba(244,198,78,.1),inset 0 0 25px rgba(244,198,78,.06);font-size:34px;color:var(--gold)}
+.brand h1{font-size:24px;letter-spacing:1.8px;margin:0;font-weight:900}.brand h1 span{display:block;color:var(--gold);font-size:13px;letter-spacing:5px;margin-top:3px}.brand p{color:var(--muted);font-size:13px;margin:9px 0 0}
+.card{background:linear-gradient(145deg,rgba(24,24,24,.96),rgba(9,9,9,.96));border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.04)}
+.tabs{display:grid;grid-template-columns:1fr 1fr;padding:4px;background:#080808;border:1px solid rgba(255,255,255,.07);border-radius:14px;margin-bottom:20px}.tab{border:0;background:transparent;color:#8f8f8f;padding:11px 8px;border-radius:10px;font:inherit;font-weight:800;cursor:pointer}.tab.active{background:linear-gradient(135deg,#f1bf3e,#ffdc72);color:#080808;box-shadow:0 7px 20px rgba(244,198,78,.15)}
+.form-title{font-size:21px;font-weight:900;margin:0 0 5px}.form-sub{font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.45}
+.field{position:relative;margin:11px 0}.field .icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:16px;opacity:.7}.field input{width:100%;height:49px;padding:0 45px 0 43px;background:#070707;color:#fff;border:1px solid #292929;border-radius:13px;outline:none;font-size:15px;transition:.2s}.field input:focus{border-color:rgba(244,198,78,.7);box-shadow:0 0 0 3px rgba(244,198,78,.08)}.toggle{position:absolute;right:8px;top:7px;height:35px;min-width:35px;border:0;background:transparent;color:#aaa;border-radius:9px;cursor:pointer}.toggle:hover{color:var(--gold)}
+.submit{width:100%;height:50px;margin-top:7px;border:0;border-radius:13px;background:linear-gradient(135deg,#efbc39,#ffdb70);color:#090909;font-size:15px;font-weight:900;cursor:pointer;box-shadow:0 12px 28px rgba(244,198,78,.16)}.submit:active{transform:translateY(1px)}.submit:disabled{opacity:.65;cursor:wait}
+.security{display:flex;gap:11px;align-items:flex-start;margin-top:16px;padding:12px;border:1px solid rgba(244,198,78,.14);background:rgba(244,198,78,.035);border-radius:13px}.security-icon{font-size:20px;color:var(--gold)}.security strong{display:block;font-size:12px}.security span{display:block;color:#858585;font-size:11px;line-height:1.4;margin-top:2px}
+.rules{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 4px}.rule{font-size:11px;color:#777}.rule.ok{color:#b8b8b8}.msg{min-height:19px;text-align:center;font-size:12px;color:#c9c9c9;margin:12px 0 0}.msg.error{color:#ff8d8d}.msg.ok{color:#b9e98d}
+.links{display:flex;justify-content:center;gap:16px;margin-top:17px}.links a,.back{color:#bcbcbc;text-decoration:none;font-size:12px}.links a:hover,.back:hover{color:var(--gold)}.back-wrap{text-align:center;margin-top:17px}
+.hidden{display:none!important}
+@media(max-width:420px){body{padding:15px 12px}.card{padding:18px;border-radius:21px}.brand{margin-bottom:13px}.brand-mark{width:58px;height:58px;font-size:30px}.brand h1{font-size:21px}.rules{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <h1>ALFRED <span>IOS STORE</span></h1>
+    <p>Accede a tu cuenta y administra tus compras.</p>
+  </div>
+
+  <section class="card">
+    <div class="tabs" role="tablist" aria-label="Cuenta">
+      <button id="tabLogin" class="tab active" type="button" onclick="mode('login')">Iniciar sesión</button>
+      <button id="tabReg" class="tab" type="button" onclick="mode('reg')">Crear cuenta</button>
+    </div>
+
+    <form id="login" autocomplete="on">
+      <h2 class="form-title">Bienvenido de nuevo</h2>
+      <p class="form-sub">Entra con tus datos para ver tu saldo, compras y archivos.</p>
+      <div class="field"><span class="icon">✉</span><input id="le" name="email" type="email" inputmode="email" autocomplete="email" placeholder="Correo electrónico" required></div>
+      <div class="field"><span class="icon">●</span><input id="lp" name="password" type="password" autocomplete="current-password" placeholder="Contraseña" required><button class="toggle" type="button" onclick="togglePass('lp',this)" aria-label="Mostrar contraseña">◉</button></div>
+      <button id="loginBtn" class="submit" type="submit">Iniciar sesión</button>
+    </form>
+
+    <form id="reg" class="hidden" autocomplete="on">
+      <h2 class="form-title">Crea tu cuenta</h2>
+      <p class="form-sub">Regístrate para guardar tu saldo, compras y productos en un solo lugar.</p>
+      <div class="field"><span class="icon">♙</span><input id="rn" name="name" autocomplete="name" placeholder="Nombre completo" required></div>
+      <div class="field"><span class="icon">✉</span><input id="re" name="email" type="email" inputmode="email" autocomplete="email" placeholder="Correo electrónico" required></div>
+      <div class="field"><span class="icon">●</span><input id="rp" name="new-password" type="password" autocomplete="new-password" placeholder="Contraseña (mínimo 8 caracteres)" minlength="8" required><button class="toggle" type="button" onclick="togglePass('rp',this)" aria-label="Mostrar contraseña">◉</button></div>
+      <div class="rules"><span id="r8" class="rule">• 8 caracteres o más</span><span id="rmail" class="rule">• Correo válido</span></div>
+      <button id="regBtn" class="submit" type="submit">Crear cuenta</button>
+    </form>
+
+    <div class="security"><div class="security-icon">▣</div><div><strong>Acceso protegido</strong><span>Tus credenciales se envían de forma segura al servidor de la tienda.</span></div></div>
+    <p id="msg" class="msg" aria-live="polite"></p>
+    <div class="links"><a href="/">← Volver a la tienda</a></div>
+  </section>
+  <div class="back-wrap"><a class="back" href="javascript:history.length>1?history.back():location.href='/'">← Volver atrás</a></div>
+</main>
+<script>
+const $=id=>document.getElementById(id),msg=$('msg');
+function mode(x){
+  const login=x==='login';$('login').classList.toggle('hidden',!login);$('reg').classList.toggle('hidden',login);
+  $('tabLogin').classList.toggle('active',login);$('tabReg').classList.toggle('active',!login);msg.textContent='';msg.className='msg';
 }
-$('login').onsubmit=async e=>{
-  e.preventDefault(); msg.textContent='Iniciando sesión...';
-  const {r,j}=await jsonFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('le').value.trim(),password:$('lp').value})});
-  msg.textContent=j.error||(r.ok?'Correcto':'No se pudo iniciar sesión.'); if(r.ok)location.href='/cuenta.html';
-};
-$('reg').onsubmit=async e=>{
-  e.preventDefault(); msg.textContent='Creando cuenta...';
-  const password=$('rp').value;
-  if(password.length<8){msg.textContent='La contraseña debe tener 8 caracteres o más.';return;}
-  const {r,j}=await jsonFetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('rn').value.trim(),email:$('re').value.trim(),password})});
-  msg.textContent=j.error||(r.ok?'Cuenta creada correctamente.':'No se pudo crear la cuenta.'); if(r.ok)location.href='/cuenta.html';
-};
+function togglePass(id,btn){const el=$(id);el.type=el.type==='password'?'text':'password';btn.textContent=el.type==='password'?'◉':'◌';}
+function setMsg(text,type=''){msg.textContent=text;msg.className='msg '+type;}
+async function jsonFetch(url,options){try{const r=await fetch(url,options);const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:'El servidor devolvió una respuesta no válida.'}}return{r,j};}catch(e){return{r:{ok:false,status:0},j:{error:'No se pudo conectar con la tienda. Inténtalo nuevamente.'}}}}
+$('login').onsubmit=async e=>{e.preventDefault();const btn=$('loginBtn');btn.disabled=true;btn.textContent='Verificando…';setMsg('Verificando tus datos…');const{r,j}=await jsonFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('le').value.trim(),password:$('lp').value})});if(r.ok){setMsg('Acceso correcto. Abriendo tu cuenta…','ok');location.href='/cuenta.html'}else{setMsg(j.error||'No se pudo iniciar sesión.','error');btn.disabled=false;btn.textContent='Iniciar sesión'}};
+$('reg').onsubmit=async e=>{e.preventDefault();const name=$('rn').value.trim(),email=$('re').value.trim(),password=$('rp').value;if(password.length<8){setMsg('La contraseña debe tener 8 caracteres o más.','error');return}if(!email.includes('@')){setMsg('Escribe un correo electrónico válido.','error');return}const btn=$('regBtn');btn.disabled=true;btn.textContent='Creando cuenta…';setMsg('Creando tu cuenta de forma segura…');const{r,j}=await jsonFetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password})});if(r.ok){setMsg('Cuenta creada. Abriendo tu cuenta…','ok');location.href='/cuenta.html'}else{setMsg(j.error||'No se pudo crear la cuenta.','error');btn.disabled=false;btn.textContent='Crear cuenta'}};
+$('rp').addEventListener('input',()=>{$('r8').className='rule '+($('rp').value.length>=8?'ok':'');$('rmail').className='rule '+($('re').value.includes('@')?'ok':'')});$('re').addEventListener('input',()=>{$('rmail').className='rule '+($('re').value.includes('@')?'ok':'')});
 fetch('/api/me',{cache:'no-store'}).then(r=>{if(r.ok)location.href='/cuenta.html'}).catch(()=>{});
-</script></body></html>
+</script>
+</body>
+</html>
