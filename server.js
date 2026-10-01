@@ -257,6 +257,24 @@ app.post("/api/buy",user,(req,res)=>{
  res.json({ok:true,message:"Compra realizada. Tus archivos ya están disponibles en tu cuenta.",delivered:true});
 });
 
+app.post("/api/buy-cart",user,(req,res)=>{
+ const ids=Array.isArray(req.body.productIds)?req.body.productIds.map(Number).filter(Number.isInteger):[];
+ if(!ids.length)return res.status(400).json({error:"El carrito está vacío."});
+ const unique=[...new Set(ids)];
+ const placeholders=unique.map(()=>'?').join(',');
+ const products=db.prepare(`SELECT * FROM products WHERE active=1 AND id IN (${placeholders})`).all(...unique);
+ if(products.length!==unique.length)return res.status(400).json({error:"Uno de los productos ya no está disponible."});
+ const total=products.reduce((sum,x)=>sum+Number(x.price||0),0);
+ const u=db.prepare("SELECT balance FROM users WHERE id=?").get(req.auth.userId);
+ if(Number(u.balance||0)<total)return res.status(400).json({error:"Saldo insuficiente para completar todo el carrito."});
+ db.transaction(()=>{
+   db.prepare("UPDATE users SET balance=balance-? WHERE id=?").run(total,req.auth.userId);
+   const add=db.prepare("INSERT INTO purchases(user_id,product_id,price,status) VALUES(?,?,?,'delivered')");
+   for(const product of products)add.run(req.auth.userId,product.id,product.price);
+ })();
+ res.json({ok:true,message:"Compra realizada. Todos los archivos ya están disponibles en tu cuenta.",delivered:true,total,count:products.length});
+});
+
 app.post("/api/admin/login",(req,res)=>{
  if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+31536000000});return res.json({ok:true});}
  res.status(401).json({error:"Credenciales incorrectas."});
