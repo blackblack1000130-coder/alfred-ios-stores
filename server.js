@@ -26,17 +26,21 @@ CREATE TABLE IF NOT EXISTS compatibility_rules(id INTEGER PRIMARY KEY AUTOINCREM
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,active INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS payment_methods(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account TEXT NOT NULL DEFAULT '',details TEXT DEFAULT '',active INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS reseller_requests(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT NOT NULL,password_hash TEXT NOT NULL,plan_months INTEGER NOT NULL,amount INTEGER NOT NULL,status TEXT DEFAULT 'pending',user_id INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP,reviewed_at TEXT);
+CREATE TABLE IF NOT EXISTS reseller_files(id INTEGER PRIMARY KEY AUTOINCREMENT,reseller_id INTEGER NOT NULL,name TEXT NOT NULL,url TEXT NOT NULL,original_name TEXT DEFAULT '',product_id INTEGER,active INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(reseller_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS reseller_products(id INTEGER PRIMARY KEY AUTOINCREMENT,reseller_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,price INTEGER NOT NULL,description TEXT DEFAULT '',file_id INTEGER,image TEXT DEFAULT '',active INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(reseller_id) REFERENCES users(id),FOREIGN KEY(file_id) REFERENCES reseller_files(id));
+CREATE TABLE IF NOT EXISTS reseller_purchases(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,reseller_id INTEGER NOT NULL,product_id INTEGER NOT NULL,price INTEGER NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id),FOREIGN KEY(reseller_id) REFERENCES users(id),FOREIGN KEY(product_id) REFERENCES reseller_products(id));
 `);
 
 // Campos de entrega digital. Se agregan sin borrar datos existentes.
-for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"],['file_url',"TEXT DEFAULT ''"],['file_name',"TEXT DEFAULT ''"]]) {
+for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT DEFAULT ''"],['ipa_url',"TEXT DEFAULT ''"],['file_url',"TEXT DEFAULT ''"],['file_name',"TEXT DEFAULT ''"],['owner_user_id',"INTEGER DEFAULT NULL"]]) {
   const exists = db.prepare(`PRAGMA table_info(products)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE products ADD COLUMN ${col} ${type}`);
 }
 // Compatibilidad con bases de datos creadas por versiones anteriores.
 { const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'receipt_mime'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN receipt_mime TEXT DEFAULT ''`); }
 { const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'payment_method_id'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN payment_method_id INTEGER DEFAULT NULL`); }
-for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
+for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"],['role',"TEXT DEFAULT 'customer'"],['reseller_status',"TEXT DEFAULT ''"],['reseller_expires_at',"TEXT DEFAULT ''"],['reseller_slug',"TEXT DEFAULT ''"],['store_name',"TEXT DEFAULT ''"],['store_color',"TEXT DEFAULT '#f7c94b'"],['reseller_plan_months',"INTEGER DEFAULT 0"],['reseller_id',"INTEGER DEFAULT NULL"]]) {
   const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
 }
@@ -140,6 +144,9 @@ function setAuth(res,payload){
 }
 function clearAuth(res){res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);}
 app.use((req,res,next)=>{req.auth=readAuth(req);next();});
+app.get("/tienda/:slug",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller-store.html")));
+app.get("/revendedor",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller.html")));
+app.get("/revendedor-comprar",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller-buy.html")));
 app.use(express.static(path.join(__dirname,"public")));
 
 const UPLOAD_DIR=process.env.UPLOAD_DIR||path.join(DATA_ROOT,"uploads");
@@ -149,6 +156,13 @@ const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
+function reseller(req,res,next){
+ if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});
+ const u=db.prepare("SELECT id,role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(req.auth.userId);
+ if(!u||u.role!=="reseller")return res.status(403).json({error:"Cuenta de revendedor requerida."});
+ if(u.reseller_status!=="active"||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:"Tu período de revendedor está vencido o suspendido."});
+ next();
+}
 
 
 function versionParts(v){
@@ -218,6 +232,37 @@ app.post('/api/admin/payment-methods/:id',admin,(req,res)=>{
 });
 app.delete('/api/admin/payment-methods/:id',admin,(req,res)=>{const id=Number(req.params.id);if(!id)return res.status(400).json({error:'Método inválido.'});db.prepare("DELETE FROM payment_methods WHERE id=?").run(id);res.json({ok:true});});
 
+// ===== SISTEMA DE REVENDEDORES =====
+const RESELLER_PLANS={1:{months:1,amount:80},2:{months:2,amount:140},3:{months:3,amount:200}};
+function slugify(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'tienda';}
+function uniqueSlug(base){let slug=slugify(base),i=2,trySlug=slug;while(db.prepare("SELECT id FROM users WHERE reseller_slug=?").get(trySlug))trySlug=slug+'-'+i++;return trySlug;}
+function addMonths(base,months){const d=new Date(base);d.setMonth(d.getMonth()+Number(months||0));return d.toISOString();}
+app.get('/api/reseller-plans',(req,res)=>res.json(Object.values(RESELLER_PLANS)));
+app.post('/api/reseller/request',async(req,res)=>{try{
+ const name=String(req.body?.name||'').trim(),email=String(req.body?.email||'').trim().toLowerCase(),password=String(req.body?.password||''),plan=RESELLER_PLANS[Number(req.body?.plan)];
+ if(name.length<2)return res.status(400).json({error:'Escribe tu nombre.'});
+ if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))return res.status(400).json({error:'Escribe un correo válido.'});
+ if(password.length<8)return res.status(400).json({error:'La contraseña debe tener 8 caracteres o más.'});
+ if(!plan)return res.status(400).json({error:'Plan no válido.'});
+ const existing=db.prepare("SELECT id FROM users WHERE lower(email)=lower(?)").get(email);
+ if(existing)return res.status(409).json({error:'Ese correo ya existe. Inicia sesión y solicita ser revendedor desde tu cuenta.'});
+ const pending=db.prepare("SELECT id FROM reseller_requests WHERE lower(email)=lower(?) AND status='pending'").get(email);
+ if(pending)return res.status(409).json({error:'Ya tienes una solicitud pendiente.'});
+ const hash=await bcrypt.hash(password,12);
+ const x=db.prepare("INSERT INTO reseller_requests(name,email,password_hash,plan_months,amount) VALUES(?,?,?,?,?)").run(name,email,hash,plan.months,plan.amount);
+ res.json({ok:true,id:x.lastInsertRowid,message:'Solicitud enviada. El administrador debe aprobarla.'});
+}catch(e){console.error('RESELLER_REQUEST_ERROR',e);res.status(500).json({error:'No se pudo enviar la solicitud.'})}});
+app.get('/api/reseller/store/:slug',(req,res)=>{const u=db.prepare("SELECT id,name,store_name,store_color,reseller_status,reseller_expires_at,reseller_plan_months,reseller_slug FROM users WHERE reseller_slug=? AND role='reseller'").get(req.params.slug);if(!u)return res.status(404).json({error:'Tienda no encontrada.'});if(u.reseller_status!=='active'||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'Esta tienda está temporalmente inactiva.'});res.json({id:u.id,name:u.name,store_name:u.store_name||u.name,store_color:u.store_color||'#f7c94b',expires_at:u.reseller_expires_at,slug:u.reseller_slug});});
+app.get('/api/reseller/store/:slug/products',(req,res)=>{const u=db.prepare("SELECT id,reseller_status,reseller_expires_at FROM users WHERE reseller_slug=? AND role='reseller'").get(req.params.slug);if(!u)return res.status(404).json({error:'Tienda no encontrada.'});if(u.reseller_status!=='active'||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'Esta tienda está temporalmente inactiva.'});res.json(db.prepare("SELECT id,name,category,price,description,image,created_at FROM reseller_products WHERE reseller_id=? AND active=1 ORDER BY id DESC").all(u.id));});
+app.post('/api/reseller/settings',reseller,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim();if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Nombre y color válidos son obligatorios.'});db.prepare("UPDATE users SET store_name=?,store_color=? WHERE id=?").run(name,color,req.auth.userId);res.json({ok:true,store_name:name,store_color:color});});
+app.get('/api/reseller/me',reseller,(req,res)=>{const u=db.prepare("SELECT id,name,email,store_name,store_color,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months FROM users WHERE id=?").get(req.auth.userId);res.json(u);});
+app.get('/api/reseller/products',reseller,(req,res)=>res.json(db.prepare("SELECT rp.*,rf.name file_name,rf.url file_url FROM reseller_products rp LEFT JOIN reseller_files rf ON rf.id=rp.file_id WHERE rp.reseller_id=? ORDER BY rp.id DESC").all(req.auth.userId)));
+app.get('/api/reseller/files',reseller,(req,res)=>res.json(db.prepare("SELECT rf.*,rp.name product_name FROM reseller_files rf LEFT JOIN reseller_products rp ON rp.file_id=rf.id WHERE rf.reseller_id=? ORDER BY rf.id DESC").all(req.auth.userId)));
+app.post('/api/reseller/upload-file',reseller,upload.single('file'),(req,res)=>{if(!req.file)return res.status(400).json({error:'No se recibió ningún archivo.'});const ext=path.extname(req.file.originalname||'').toLowerCase(),allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){}return res.status(400).json({error:'Tipo de archivo no permitido.'});}const original=path.basename(req.file.originalname||('archivo'+ext)),safe=original.replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\\s+/g,' ').trim()||('archivo'+ext);let target=path.join(UPLOAD_DIR,'reseller-'+req.auth.userId+'-'+safe);if(fs.existsSync(target))target=path.join(UPLOAD_DIR,'reseller-'+req.auth.userId+'-'+Date.now()+'-'+safe);fs.renameSync(req.file.path,target);const x=db.prepare("INSERT INTO reseller_files(reseller_id,name,url,original_name) VALUES(?,?,?,?)").run(req.auth.userId,path.basename(target),'/uploads/'+path.basename(target),original);res.json({ok:true,id:x.lastInsertRowid,url:'/uploads/'+path.basename(target),name:original});});
+app.post('/api/reseller/products',reseller,(req,res)=>{const name=String(req.body?.name||'').trim(),category=String(req.body?.category||'Otros').trim(),price=Number(req.body?.price),description=String(req.body?.description||'').trim(),fileId=Number(req.body?.file_id||0)||null;if(!name||!Number.isInteger(price)||price<0)return res.status(400).json({error:'Datos de producto inválidos.'});if(fileId&&!db.prepare("SELECT id FROM reseller_files WHERE id=? AND reseller_id=?").get(fileId,req.auth.userId))return res.status(400).json({error:'Archivo no válido.'});const x=db.prepare("INSERT INTO reseller_products(reseller_id,name,category,price,description,file_id) VALUES(?,?,?,?,?,?)").run(req.auth.userId,name,category,price,description,fileId);res.json({ok:true,id:x.lastInsertRowid});});
+app.post('/api/reseller/buy/:id',user,(req,res)=>{const rp=db.prepare("SELECT rp.*,u.reseller_status,u.reseller_expires_at FROM reseller_products rp JOIN users u ON u.id=rp.reseller_id WHERE rp.id=? AND rp.active=1").get(req.params.id);if(!rp)return res.status(404).json({error:'Producto no encontrado.'});if(rp.reseller_status!=='active'||!rp.reseller_expires_at||new Date(rp.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'La tienda está vencida o suspendida.'});const u=db.prepare("SELECT id,balance,reseller_id FROM users WHERE id=?").get(req.auth.userId);if(u.balance<rp.price)return res.status(400).json({error:'Saldo insuficiente. Agrega saldo primero.'});db.transaction(()=>{db.prepare("UPDATE users SET balance=balance-? WHERE id=?").run(rp.price,u.id);db.prepare("INSERT INTO reseller_purchases(user_id,reseller_id,product_id,price) VALUES(?,?,?,?)").run(u.id,rp.reseller_id,rp.id,rp.price);if(!u.reseller_id)db.prepare("UPDATE users SET reseller_id=? WHERE id=?").run(rp.reseller_id,u.id);})();res.json({ok:true,message:'Compra realizada. El archivo ya está disponible.'});});
+app.post('/api/reseller/products/:id',(req,res)=>{if(!req.auth?.userId)return res.status(401).json({error:'Debes iniciar sesión.'});const u=db.prepare("SELECT role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(req.auth.userId);if(u?.role!=='reseller'||u.reseller_status!=='active'||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'Tu período de revendedor está vencido o suspendido.'});const id=Number(req.params.id),name=String(req.body?.name||'').trim(),category=String(req.body?.category||'Otros').trim(),price=Number(req.body?.price),description=String(req.body?.description||'').trim(),fileId=Number(req.body?.file_id||0)||null,active=req.body?.active===false?0:1;if(!name||!Number.isInteger(price)||price<0)return res.status(400).json({error:'Datos inválidos.'});if(fileId&&!db.prepare("SELECT id FROM reseller_files WHERE id=? AND reseller_id=?").get(fileId,req.auth.userId))return res.status(400).json({error:'Archivo no válido.'});const r=db.prepare("UPDATE reseller_products SET name=?,category=?,price=?,description=?,file_id=?,active=? WHERE id=? AND reseller_id=?").run(name,category,price,description,fileId,active,id,req.auth.userId);if(!r.changes)return res.status(404).json({error:'Producto no encontrado.'});res.json({ok:true});});
+
 app.get("/api/products",(req,res)=>{
  const c=req.query.category;
  const rows=c&&c!=="Todas"?db.prepare("SELECT * FROM products WHERE active=1 AND lower(trim(category))=lower(trim(?)) ORDER BY id DESC").all(c):db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id DESC").all();
@@ -228,6 +273,7 @@ app.post("/api/register",async(req,res)=>{
    const name=String(req.body?.name||'').trim();
    const email=String(req.body?.email||'').trim().toLowerCase();
    const password=String(req.body?.password||'');
+   const resellerSlug=String(req.body?.reseller_slug||'').trim();
    if(name.length<2)return res.status(400).json({error:"Escribe tu nombre."});
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Escribe un correo válido."});
    if(password.length<8)return res.status(400).json({error:"La contraseña debe tener 8 caracteres o más."});
@@ -236,7 +282,8 @@ app.post("/api/register",async(req,res)=>{
    const h=await bcrypt.hash(password,12);
    let x;
    try{
-     x=db.prepare("INSERT INTO users(name,email,password_hash) VALUES(?,?,?)").run(name,email,h);
+     const owner=resellerSlug?db.prepare("SELECT id FROM users WHERE reseller_slug=? AND role='reseller' AND reseller_status='active' AND reseller_expires_at>?").get(resellerSlug,new Date().toISOString()):null;
+     x=db.prepare("INSERT INTO users(name,email,password_hash,reseller_id) VALUES(?,?,?,?)").run(name,email,h,owner?.id||null);
    }catch(e){
      if(String(e.code||'').includes('SQLITE_CONSTRAINT')){
        return res.status(409).json({error:"Ese correo ya está registrado. Inicia sesión o usa otro correo."});
@@ -272,8 +319,12 @@ app.get("/api/compatibility",(req,res)=>res.json(db.prepare('SELECT * FROM compa
 app.get("/api/my-products",user,(req,res)=>{
  const rows=db.prepare(`SELECT pu.id purchase_id,pu.status,pu.created_at purchased_at,p.id product_id,p.name,p.price,p.category,p.mediafire_url,p.mega_url,p.file_password,p.file_url,p.file_name,p.image,p.video,
  CASE WHEN pu.status='delivered' THEN (SELECT ipa_url FROM category_downloads cd WHERE cd.category=p.category) ELSE '' END AS ipa_url,
-(SELECT ipa_name FROM category_downloads cd WHERE cd.category=p.category) AS ipa_name
- FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
+(SELECT ipa_name FROM category_downloads cd WHERE cd.category=p.category) AS ipa_name,'' AS reseller_store
+ FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=?
+ UNION ALL
+ SELECT rp.id purchase_id,'delivered' status,rp.created_at purchased_at,rp.product_id product_id,p.name,p.price,p.category,'' mediafire_url,'' mega_url,'' file_password,rf.url file_url,rf.original_name file_name,'' image,'' video,'' ipa_url,'' ipa_name,r.store_name reseller_store
+ FROM reseller_purchases rp JOIN reseller_products p ON p.id=rp.product_id JOIN users r ON r.id=rp.reseller_id LEFT JOIN reseller_files rf ON rf.id=p.file_id WHERE rp.user_id=?
+ ORDER BY purchase_id DESC`).all(req.auth.userId,req.auth.userId);
  res.json(rows);
 });
 app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
@@ -326,12 +377,25 @@ app.post("/api/admin/login",(req,res)=>{
  res.status(401).json({error:"Credenciales incorrectas."});
 });
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
+app.get('/api/admin/resellers',admin,(req,res)=>res.json(db.prepare("SELECT id,name,email,store_name,store_color,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months,created_at FROM users WHERE role='reseller' ORDER BY id DESC").all()));
+app.get('/api/admin/reseller-requests',admin,(req,res)=>res.json(db.prepare("SELECT id,name,email,plan_months,amount,status,created_at,reviewed_at FROM reseller_requests ORDER BY id DESC").all()));
+app.post('/api/admin/reseller-requests/:id/approve',admin,(req,res)=>{const q=db.prepare("SELECT * FROM reseller_requests WHERE id=? AND status='pending'").get(req.params.id);if(!q)return res.status(404).json({error:'Solicitud no encontrada.'});const exists=db.prepare("SELECT id FROM users WHERE lower(email)=lower(?)").get(q.email);if(exists)return res.status(409).json({error:'Ese correo ya tiene una cuenta.'});const slug=uniqueSlug(q.name),now=new Date(),expires=addMonths(now,q.plan_months);const x=db.prepare("INSERT INTO users(name,email,password_hash,role,reseller_status,reseller_expires_at,reseller_slug,store_name,store_color,reseller_plan_months) VALUES(?,?,?,?,?,?,?,?,?,?)").run(q.name,q.email,q.password_hash,'reseller','active',expires,slug,q.name,'#f7c94b',q.plan_months);db.prepare("UPDATE reseller_requests SET status='approved',user_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").run(x.lastInsertRowid,q.id);res.json({ok:true,slug,expires});});
+app.post('/api/admin/resellers/:id/renew',admin,(req,res)=>{const months=Number(req.body?.months);if(![1,2,3].includes(months))return res.status(400).json({error:'Solo se permiten 1, 2 o 3 meses.'});const u=db.prepare("SELECT * FROM users WHERE id=? AND role='reseller'").get(req.params.id);if(!u)return res.status(404).json({error:'Revendedor no encontrado.'});const base=u.reseller_expires_at&&new Date(u.reseller_expires_at).getTime()>Date.now()?u.reseller_expires_at:new Date().toISOString(),expires=addMonths(base,months);db.prepare("UPDATE users SET reseller_status='active',reseller_expires_at=?,reseller_plan_months=? WHERE id=?").run(expires,months,u.id);res.json({ok:true,expires});});
+app.post('/api/admin/resellers/:id/status',admin,(req,res)=>{const status=['active','suspended'].includes(req.body?.status)?req.body.status:'suspended';const r=db.prepare("UPDATE users SET reseller_status=? WHERE id=? AND role='reseller'").run(status,req.params.id);if(!r.changes)return res.status(404).json({error:'Revendedor no encontrado.'});res.json({ok:true});});
+app.post('/api/admin/resellers/:id/settings',admin,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim();if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Datos inválidos.'});db.prepare("UPDATE users SET store_name=?,store_color=? WHERE id=? AND role='reseller'").run(name,color,req.params.id);res.json({ok:true});});
+app.get('/api/admin/resellers/:id/files',admin,(req,res)=>res.json(db.prepare("SELECT rf.*,rp.name product_name FROM reseller_files rf LEFT JOIN reseller_products rp ON rp.file_id=rf.id WHERE rf.reseller_id=? ORDER BY rf.id DESC").all(req.params.id)));
+app.post('/api/admin/resellers/:id/upload-file',admin,upload.single('file'),(req,res)=>{if(!req.file)return res.status(400).json({error:'No se recibió ningún archivo.'});const ext=path.extname(req.file.originalname||'').toLowerCase(),allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){}return res.status(400).json({error:'Tipo de archivo no permitido.'});}const original=path.basename(req.file.originalname||('archivo'+ext)),safe=original.replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\s+/g,' ').trim()||('archivo'+ext);let target=path.join(UPLOAD_DIR,'admin-reseller-'+req.params.id+'-'+safe);if(fs.existsSync(target))target=path.join(UPLOAD_DIR,'admin-reseller-'+req.params.id+'-'+Date.now()+'-'+safe);fs.renameSync(req.file.path,target);const x=db.prepare("INSERT INTO reseller_files(reseller_id,name,url,original_name) VALUES(?,?,?,?)").run(req.params.id,path.basename(target),'/uploads/'+path.basename(target),original);res.json({ok:true,id:x.lastInsertRowid,url:'/uploads/'+path.basename(target),name:original});});
+app.post('/api/admin/reseller-files/:id/replace',admin,upload.single('file'),(req,res)=>{const old=db.prepare("SELECT * FROM reseller_files WHERE id=?").get(req.params.id);if(!old)return res.status(404).json({error:'Archivo no encontrado.'});if(!req.file)return res.status(400).json({error:'No se recibió ningún archivo.'});const ext=path.extname(req.file.originalname||'').toLowerCase(),allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){}return res.status(400).json({error:'Tipo de archivo no permitido.'});}try{const oldPath=path.join(UPLOAD_DIR,path.basename(old.url||''));if(fs.existsSync(oldPath))fs.unlinkSync(oldPath)}catch(e){}const original=path.basename(req.file.originalname||('archivo'+ext)),safe=original.replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\s+/g,' ').trim()||('archivo'+ext);let target=path.join(UPLOAD_DIR,'reseller-'+old.reseller_id+'-'+safe);if(fs.existsSync(target))target=path.join(UPLOAD_DIR,'reseller-'+old.reseller_id+'-'+Date.now()+'-'+safe);fs.renameSync(req.file.path,target);db.prepare("UPDATE reseller_files SET name=?,url=?,original_name=? WHERE id=?").run(path.basename(target),'/uploads/'+path.basename(target),original,old.id);res.json({ok:true,url:'/uploads/'+path.basename(target),name:original});});
+app.delete('/api/admin/reseller-files/:id',admin,(req,res)=>{const f=db.prepare("SELECT * FROM reseller_files WHERE id=?").get(req.params.id);if(!f)return res.status(404).json({error:'Archivo no encontrado.'});try{const fp=path.join(UPLOAD_DIR,path.basename(f.url||''));if(fs.existsSync(fp))fs.unlinkSync(fp)}catch(e){}db.prepare("DELETE FROM reseller_files WHERE id=?").run(f.id);res.json({ok:true});});
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users ORDER BY id DESC").all(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
  topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id ORDER BY t.id DESC").all(),
  purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all(),
- compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all()
+ compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all(),
+ resellers:db.prepare("SELECT id,name,email,store_name,store_color,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months,created_at FROM users WHERE role='reseller' ORDER BY id DESC").all(),
+ reseller_requests:db.prepare("SELECT id,name,email,plan_months,amount,status,created_at,reviewed_at FROM reseller_requests ORDER BY id DESC").all(),
+ reseller_purchases:db.prepare("SELECT rp.*,u.name client_name,u.email client_email,r.name reseller_name,p.name product_name FROM reseller_purchases rp JOIN users u ON u.id=rp.user_id JOIN users r ON r.id=rp.reseller_id JOIN reseller_products p ON p.id=rp.product_id ORDER BY rp.id DESC").all()
 }));
 app.post("/api/admin/topup/:id/approve",admin,(req,res)=>{
  const t=db.prepare("SELECT * FROM topups WHERE id=?").get(req.params.id);
