@@ -163,6 +163,14 @@ function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
 function reseller(req,res,next){
  if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});
+ // El creador puede abrir el panel de cualquier revendedor desde su propio panel.
+ // Solo se acepta esta vista cuando la sesión actual es realmente de administrador.
+ const asId=Number(req.query?.admin_reseller||0);
+ if(asId&&req.auth.admin){
+   const target=db.prepare("SELECT id,role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(asId);
+   if(!target||target.role!=="reseller")return res.status(404).json({error:"Revendedor no encontrado."});
+   req.auth.userId=target.id;
+ }
  const u=db.prepare("SELECT id,role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(req.auth.userId);
  if(!u||u.role!=="reseller")return res.status(403).json({error:"Cuenta de revendedor requerida."});
  if(u.reseller_status!=="active"||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:"Tu período de revendedor está vencido o suspendido."});
@@ -286,6 +294,24 @@ app.post('/api/reseller/customers/:id/balance',reseller,(req,res)=>{
    if(delta!==0) db.prepare('INSERT INTO balance_adjustments(user_id,amount,note) VALUES(?,?,?)').run(customerId,delta,note||'Ajuste manual del revendedor');
  })();
  res.json({ok:true,balance:mode==='set'?value:Number(belongs.balance||0)+value});
+});
+app.get('/api/reseller/topups',reseller,(req,res)=>{
+ const rid=req.auth.userId;
+ res.json(db.prepare(`SELECT t.id,t.user_id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.status='pending' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?)) ORDER BY t.id DESC`).all(rid,rid));
+});
+app.post('/api/reseller/topup/:id/approve',reseller,(req,res)=>{
+ const rid=req.auth.userId;
+ const t=db.prepare(`SELECT t.*,u.reseller_id FROM topups t JOIN users u ON u.id=t.user_id WHERE t.id=? AND t.status='pending' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?))`).get(req.params.id,rid,rid);
+ if(!t)return res.status(404).json({error:'Recarga no encontrada o no pertenece a tu tienda.'});
+ db.transaction(()=>{db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(t.amount,t.user_id);db.prepare("UPDATE topups SET status='approved' WHERE id=?").run(t.id);})();
+ res.json({ok:true});
+});
+app.post('/api/reseller/topup/:id/reject',reseller,(req,res)=>{
+ const rid=req.auth.userId;
+ const t=db.prepare(`SELECT t.id FROM topups t JOIN users u ON u.id=t.user_id WHERE t.id=? AND t.status='pending' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?))`).get(req.params.id,rid,rid);
+ if(!t)return res.status(404).json({error:'Recarga no encontrada o no pertenece a tu tienda.'});
+ db.prepare("UPDATE topups SET status='rejected' WHERE id=? AND status='pending'").run(t.id);
+ res.json({ok:true});
 });
 app.get('/api/reseller/customers/:id/purchases',reseller,(req,res)=>{
  const customerId=Number(req.params.id);
