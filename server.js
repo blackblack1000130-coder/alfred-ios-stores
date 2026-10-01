@@ -177,7 +177,7 @@ app.post("/api/admin/settings",admin,(req,res)=>{
 
 app.get("/api/products",(req,res)=>{
  const c=req.query.category;
- const rows=c&&c!=="Todas"?db.prepare("SELECT * FROM products WHERE active=1 AND category=? ORDER BY id DESC").all(c):db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id DESC").all();
+ const rows=c&&c!=="Todas"?db.prepare("SELECT * FROM products WHERE active=1 AND lower(trim(category))=lower(trim(?)) ORDER BY id DESC").all(c):db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id DESC").all();
  res.json(rows);
 });
 app.post("/api/register",async(req,res)=>{
