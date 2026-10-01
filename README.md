@@ -1,32 +1,34 @@
-# ALFRED IOS STORES — paquete completo
+# ALFRED IOS STORES — Railway
 
-Incluye la tienda visual principal, cuentas de clientes, saldo, comprobantes, compras, entrega, panel administrativo y categorías.
+## Despliegue
 
-## Tienda
-- Sensibilidades
-- Filza
-- 3105
-- iMazing
-- 6 productos iniciales con sus precios
-- Compra con saldo
-- Aviso de entrega de 1 a 2 horas
-- Banreservas: 9605206264
+1. Sube el contenido de esta carpeta a GitHub (no el ZIP).
+2. En Railway crea un proyecto y despliega el repositorio.
+3. Railway puede detectar Node.js automáticamente; el proyecto incluye `railway.json` y `npm start`.
+4. Crea un **Volume** para el servicio con mount path `/app/data`.
+5. Añade estas variables en Railway:
+
+```text
+NODE_ENV=production
+DB_PATH=/app/data/store.db
+UPLOAD_DIR=/app/data/uploads
+ADMIN_EMAIL=tu_correo_de_admin
+ADMIN_PASSWORD=tu_clave_segura
+SESSION_SECRET=una_cadena_larga_y_aleatoria
+```
+
+6. En Networking, genera el dominio público.
+
+El Volume es importante porque SQLite y los archivos subidos necesitan almacenamiento persistente. Railway indica que el volumen debe montarse en la ruta donde la aplicación escribe los datos. 
 
 ## Panel
+
 `/admin/`
 
-## Credenciales
-Correo de administrador: Blackblack1000130@gmail.com
-La contraseña se configura únicamente en Render mediante `ADMIN_PASSWORD`; no se guarda en GitHub.
+## Salud
 
-## Subida a GitHub
-Sube TODO el contenido de este paquete, no el ZIP dentro del repositorio. No subas `.env`.
+`/api/health`
 
-## Render Free
+## Seguridad
 
-Esta edición no usa Persistent Disk ni `/var/data`, por lo que puede arrancar en un Web Service Free.
-
-**Importante:** el almacenamiento local de Render Free es efímero: la base SQLite y archivos subidos pueden perderse en reinicios, redeploys o spin-down. Render recomienda usar un datastore para datos que deban persistir. Esta edición es adecuada para prueba/preview; para una tienda real con cuentas, balances, compras y comprobantes, se debe migrar la persistencia a PostgreSQL u otro almacenamiento externo. 
-
-
-Cambios: sesión de usuario/admin de 1 año con cierre de sesión; cambios del panel no son sobrescritos al reiniciar; precios mostrados como USD; comprobantes de imagen visibles en admin.
+Las contraseñas y secretos deben configurarse como Variables de Railway y no subirse a GitHub.

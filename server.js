@@ -125,8 +125,9 @@ function clearAuth(res){res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=/; Htt
 app.use((req,res,next)=>{req.auth=readAuth(req);next();});
 app.use(express.static(path.join(__dirname,"public")));
 
-const UPLOAD_DIR=path.join(__dirname,"public","uploads");
+const UPLOAD_DIR=process.env.UPLOAD_DIR||path.join(__dirname,"data","uploads");
 fs.mkdirSync(UPLOAD_DIR,{recursive:true});
+app.use("/uploads",express.static(UPLOAD_DIR));
 const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
