@@ -224,6 +224,7 @@ app.post('/api/admin/categories',admin,(req,res)=>{
  if(db.prepare("SELECT id FROM categories WHERE lower(name)=lower(?)").get(name))return res.status(409).json({error:'Esa categoría ya existe.'});
  const max=db.prepare("SELECT COALESCE(MAX(sort_order),0) m FROM categories").get().m;
  const x=db.prepare("INSERT INTO categories(name,sort_order) VALUES(?,?)").run(name,Number(max)+1);
+ db.prepare("INSERT OR IGNORE INTO category_downloads(category,ipa_url,ipa_name) VALUES(?,?,?)").run(name,"",name+" IPA");
  res.json({ok:true,id:x.lastInsertRowid,name});
 });
 app.post('/api/admin/categories/:id',admin,(req,res)=>{
@@ -537,7 +538,7 @@ app.post("/api/admin/category-downloads",admin,(req,res)=>{
  const category=String(req.body.category||'').trim();
  const ipa_url=String(req.body.ipa_url||'').trim();
  const ipa_name=String(req.body.ipa_name||'').trim() || category+' IPA';
- if(!['Filza','3105','iMazing'].includes(category)) return res.status(400).json({error:"Categoría no válida."});
+ if(!category || !db.prepare("SELECT id FROM categories WHERE lower(name)=lower(?) AND active=1").get(category)) return res.status(400).json({error:"Categoría no válida."});
  db.prepare("INSERT INTO category_downloads(category,ipa_url,ipa_name) VALUES(?,?,?) ON CONFLICT(category) DO UPDATE SET ipa_url=excluded.ipa_url,ipa_name=excluded.ipa_name").run(category,ipa_url,ipa_name);
  res.json({ok:true});
 });
@@ -550,7 +551,7 @@ app.post("/api/admin/products",admin,(req,res)=>{
 app.post("/api/admin/products/:id",admin,(req,res)=>{
  const {name,category,price,description,image,video,mediafire_url,mega_url,file_password,ipa_url,file_url,file_name,active}=req.body;
  if(!name||!category||!Number.isInteger(Number(price))||Number(price)<0)return res.status(400).json({error:"Datos inválidos."});
- const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,mega_url=?,file_password=?,ipa_url=?,file_url=?,file_name=?,active=? WHERE id=?").run(name.trim(),category,Number(price),description||"",image||"",video||"",mediafire_url||"",mega_url||"",file_password||"",ipa_url||"",file_url||"",file_name||"",active?1:0,req.params.id);
+ const result=db.prepare("UPDATE products SET name=?,category=?,price=?,description=?,image=?,video=?,mediafire_url=?,mega_url=?,file_password=?,ipa_url=?,file_url=?,file_name=?,active=? WHERE id=?").run(String(name).trim(),String(category).trim(),Number(price),String(description||""),String(image||""),String(video||""),String(mediafire_url||""),String(mega_url||""),String(file_password||""),String(ipa_url||""),String(file_url||""),String(file_name||""),(active===true||active===1||active==='1')?1:0,Number(req.params.id));
  if(!result.changes)return res.status(404).json({error:"Producto no encontrado."});
  res.json({ok:true});
 });
