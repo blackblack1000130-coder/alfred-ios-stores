@@ -241,7 +241,7 @@ app.get('/api/reseller-plans',(req,res)=>res.json(Object.values(RESELLER_PLANS))
 app.post('/api/reseller/request',async(req,res)=>{try{
  const name=String(req.body?.name||'').trim(),email=String(req.body?.email||'').trim().toLowerCase(),password=String(req.body?.password||''),plan=RESELLER_PLANS[Number(req.body?.plan)];
  if(name.length<2)return res.status(400).json({error:'Escribe tu nombre.'});
- if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))return res.status(400).json({error:'Escribe un correo válido.'});
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Escribe un correo válido.'});
  if(password.length<8)return res.status(400).json({error:'La contraseña debe tener 8 caracteres o más.'});
  if(!plan)return res.status(400).json({error:'Plan no válido.'});
  const existing=db.prepare("SELECT id FROM users WHERE lower(email)=lower(?)").get(email);
