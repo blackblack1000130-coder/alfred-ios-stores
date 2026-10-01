@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY AUTOINCREMENT,user_i
 CREATE TABLE IF NOT EXISTS balance_adjustments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,amount INTEGER NOT NULL,note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS compatibility_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,min_version TEXT NOT NULL,max_version TEXT NOT NULL,compatible INTEGER NOT NULL DEFAULT 1,enabled INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,active INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS payment_methods(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account TEXT NOT NULL DEFAULT '',details TEXT DEFAULT '',active INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 `);
 
 // Campos de entrega digital. Se agregan sin borrar datos existentes.
@@ -33,12 +35,23 @@ for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT
 }
 // Compatibilidad con bases de datos creadas por versiones anteriores.
 { const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'receipt_mime'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN receipt_mime TEXT DEFAULT ''`); }
+{ const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'payment_method_id'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN payment_method_id INTEGER DEFAULT NULL`); }
 for (const [col, type] of [['iphone_model',"TEXT DEFAULT ''"],['ios_version',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === col);
   if (!exists) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`);
 }
 db.exec(`CREATE TABLE IF NOT EXISTS category_downloads(category TEXT PRIMARY KEY, ipa_url TEXT DEFAULT '', ipa_name TEXT DEFAULT '')`);
 for (const c of ['Filza','3105','iMazing']) db.prepare("INSERT OR IGNORE INTO category_downloads(category) VALUES(?)").run(c);
+const existingCategories=db.prepare("SELECT DISTINCT category FROM products WHERE trim(category)<>''").all().map(x=>String(x.category).trim());
+const categorySeed=[...new Set(['Filza','3105','iMazing','Premium','Otros',...existingCategories])];
+const insertCategory=db.prepare("INSERT OR IGNORE INTO categories(name,sort_order) VALUES(?,?)");
+categorySeed.forEach((name,i)=>insertCategory.run(name,i));
+if(db.prepare("SELECT COUNT(*) c FROM payment_methods").get().c===0){
+ const pm=db.prepare("INSERT INTO payment_methods(name,account,details,sort_order) VALUES(?,?,?,?)");
+ const legacyMethod=db.prepare("SELECT value FROM settings WHERE key='payment_method'").get()?.value || 'Banreservas';
+ const legacyAccount=db.prepare("SELECT value FROM settings WHERE key='payment_account'").get()?.value || '9605206264';
+ pm.run(legacyMethod,legacyAccount,'',0);
+}
 const compatCount=db.prepare('SELECT COUNT(*) c FROM compatibility_rules').get().c;
 if(!compatCount){
  const ins=db.prepare('INSERT INTO compatibility_rules(label,min_version,max_version,compatible,enabled) VALUES(?,?,?,?,1)');
@@ -169,11 +182,41 @@ for(const [k,v] of Object.entries(DEFAULT_SETTINGS)) db.prepare("INSERT OR IGNOR
 function getSettings(){const out={...DEFAULT_SETTINGS};for(const r of db.prepare("SELECT key,value FROM settings").all())out[r.key]=r.value;return out;}
 app.get("/api/settings",(req,res)=>res.json(getSettings()));
 app.post("/api/admin/settings",admin,(req,res)=>{
- const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel','whatsapp_support','category_image_Filza','category_image_3105','category_image_iMazing','category_image_Premium','category_image_Otros'];
+ const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel','whatsapp_support'];
  const up=db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
  for(const k of allowed){if(req.body&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
+ for(const k of Object.keys(req.body||{})){if(/^category_image_[A-Za-z0-9 _-]+$/.test(k)&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
  res.json({ok:true,settings:getSettings()});
 });
+
+app.get('/api/categories',(req,res)=>res.json(db.prepare("SELECT id,name,active,sort_order FROM categories WHERE active=1 ORDER BY sort_order,id").all()));
+app.post('/api/admin/categories',admin,(req,res)=>{
+ const name=String(req.body.name||'').trim().replace(/\s+/g,' ');
+ if(!name||name.length>50)return res.status(400).json({error:'Escribe un nombre de categoría válido.'});
+ if(db.prepare("SELECT id FROM categories WHERE lower(name)=lower(?)").get(name))return res.status(409).json({error:'Esa categoría ya existe.'});
+ const max=db.prepare("SELECT COALESCE(MAX(sort_order),0) m FROM categories").get().m;
+ const x=db.prepare("INSERT INTO categories(name,sort_order) VALUES(?,?)").run(name,Number(max)+1);
+ res.json({ok:true,id:x.lastInsertRowid,name});
+});
+app.post('/api/admin/categories/:id',admin,(req,res)=>{
+ const id=Number(req.params.id),name=String(req.body.name||'').trim().replace(/\s+/g,' '),active=req.body.active===false?0:1;
+ if(!id||!name)return res.status(400).json({error:'Datos inválidos.'});
+ if(db.prepare("SELECT id FROM categories WHERE lower(name)=lower(?) AND id<>?").get(name,id))return res.status(409).json({error:'Esa categoría ya existe.'});
+ db.prepare("UPDATE categories SET name=?,active=? WHERE id=?").run(name,active,id); res.json({ok:true});
+});
+app.get('/api/payment-methods',(req,res)=>res.json(db.prepare("SELECT id,name,account,details FROM payment_methods WHERE active=1 ORDER BY sort_order,id").all()));
+app.post('/api/admin/payment-methods',admin,(req,res)=>{
+ const name=String(req.body.name||'').trim(),account=String(req.body.account||'').trim(),details=String(req.body.details||'').trim();
+ if(!name||!account)return res.status(400).json({error:'Nombre y cuenta/dato son obligatorios.'});
+ const max=db.prepare("SELECT COALESCE(MAX(sort_order),0) m FROM payment_methods").get().m;
+ const x=db.prepare("INSERT INTO payment_methods(name,account,details,sort_order) VALUES(?,?,?,?)").run(name,account,details,Number(max)+1); res.json({ok:true,id:x.lastInsertRowid});
+});
+app.post('/api/admin/payment-methods/:id',admin,(req,res)=>{
+ const id=Number(req.params.id),name=String(req.body.name||'').trim(),account=String(req.body.account||'').trim(),details=String(req.body.details||'').trim(),active=req.body.active===false?0:1;
+ if(!id||!name||!account)return res.status(400).json({error:'Nombre y cuenta/dato son obligatorios.'});
+ db.prepare("UPDATE payment_methods SET name=?,account=?,details=?,active=? WHERE id=?").run(name,account,details,active,id); res.json({ok:true});
+});
+app.delete('/api/admin/payment-methods/:id',admin,(req,res)=>{const id=Number(req.params.id);if(!id)return res.status(400).json({error:'Método inválido.'});db.prepare("DELETE FROM payment_methods WHERE id=?").run(id);res.json({ok:true});});
 
 app.get("/api/products",(req,res)=>{
  const c=req.query.category;
@@ -233,7 +276,7 @@ app.get("/api/my-products",user,(req,res)=>{
  FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? ORDER BY pu.id DESC`).all(req.auth.userId);
  res.json(rows);
 });
-app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT id,amount,receipt,receipt_mime,status,created_at FROM topups WHERE user_id=? ORDER BY id DESC").all(req.auth.userId)));
+app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
 app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
@@ -242,7 +285,10 @@ app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const finalName=`comprobante-${Date.now()}-${safeBase}${ext||''}`;
  const finalPath=path.join(UPLOAD_DIR,finalName);
  fs.renameSync(req.file.path,finalPath);
- db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime) VALUES(?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+finalName,req.file.mimetype||"");
+ const paymentMethodId=req.body.payment_method_id?Number(req.body.payment_method_id):null;
+ const paymentExists=paymentMethodId?db.prepare("SELECT id FROM payment_methods WHERE id=? AND active=1").get(paymentMethodId):null;
+ if(paymentMethodId&&!paymentExists)return res.status(400).json({error:"Método de pago no válido."});
+ db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime,payment_method_id) VALUES(?,?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+finalName,req.file.mimetype||"",paymentMethodId);
  res.json({ok:true,message:"Comprobante enviado. Queda pendiente de verificación."});
 });
 app.post("/api/buy",user,(req,res)=>{
@@ -282,8 +328,8 @@ app.post("/api/admin/login",(req,res)=>{
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at FROM users ORDER BY id DESC").all(),
- products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
- topups:db.prepare("SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC").all(),
+ products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
+ topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id ORDER BY t.id DESC").all(),
  purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all(),
  compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all()
 }));
