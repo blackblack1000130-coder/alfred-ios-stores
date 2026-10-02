@@ -230,9 +230,14 @@ const DEFAULT_SETTINGS={
  compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel.",
  whatsapp_channel:"https://whatsapp.com/channel/0029VbB1aAQDp2Q5F3dUDH3S",
  whatsapp_support:"https://wa.me/message/YXZINHSERCDNP1",
- main_store_name:"ALFRED IOS STORE",main_store_color:"#f7c94b",main_header_background:""
+ main_store_name:"ALFRED IOS STORE",main_store_color:"#f7c94b",main_background:"/assets/alfred-ios-stores-luxury-bg.png",main_header_background:""
 };
 for(const [k,v] of Object.entries(DEFAULT_SETTINGS)) db.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").run(k,v);
+// V19: apply the new owner store/panel background once, without affecting future edits.
+if(!db.prepare("SELECT 1 FROM settings WHERE key=?").get("background_v19_applied")){
+ db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run("main_background","/assets/alfred-ios-stores-luxury-bg.png");
+ db.prepare("INSERT INTO settings(key,value) VALUES(?,?)").run("background_v19_applied","1");
+}
 function getSettings(){const out={...DEFAULT_SETTINGS};for(const r of db.prepare("SELECT key,value FROM settings").all())out[r.key]=r.value;return out;}
 app.get("/api/settings",(req,res)=>res.json(getSettings()));
 app.post("/api/admin/settings",admin,(req,res)=>{
@@ -509,7 +514,9 @@ app.post('/api/admin/resellers/:id/products/:productId',admin,(req,res)=>{const 
 app.delete('/api/admin/resellers/:id/products/:productId',admin,(req,res)=>{const r=db.prepare('DELETE FROM reseller_products WHERE id=? AND reseller_id=?').run(req.params.productId,req.params.id);if(!r.changes)return res.status(404).json({error:'Producto no encontrado.'});res.json({ok:true});});
 app.get('/api/admin/resellers/:id/customers',admin,(req,res)=>res.json(db.prepare(`SELECT u.id,u.name,u.email,u.balance,u.created_at,COUNT(rp.id) purchase_count,COALESCE(SUM(rp.price),0) total_spent FROM users u LEFT JOIN reseller_purchases rp ON rp.user_id=u.id AND rp.reseller_id=? WHERE u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rx WHERE rx.user_id=u.id AND rx.reseller_id=?) GROUP BY u.id ORDER BY u.id DESC`).all(req.params.id,req.params.id,req.params.id)));
 app.post('/api/admin/resellers/:id/customers/:customerId/balance',admin,(req,res)=>{const rid=Number(req.params.id),cid=Number(req.params.customerId),mode=String(req.body?.mode||'add'),value=Number(req.body?.amount),note=String(req.body?.note||'Ajuste manual del creador a cliente de revendedor').trim().slice(0,200);if(!Number.isInteger(value)||value<0)return res.status(400).json({error:'El saldo debe ser un número entero mayor o igual a 0.'});const u=db.prepare(`SELECT u.id,u.balance FROM users u WHERE u.id=? AND u.role='customer' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rx WHERE rx.user_id=u.id AND rx.reseller_id=?))`).get(cid,rid,rid);if(!u)return res.status(404).json({error:'Cliente no encontrado en esta tienda.'});if(!['add','set'].includes(mode))return res.status(400).json({error:'Modo inválido.'});const delta=mode==='set'?value-Number(u.balance||0):value;db.transaction(()=>{if(mode==='set')db.prepare('UPDATE users SET balance=? WHERE id=?').run(value,cid);else db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(value,cid);if(delta)db.prepare('INSERT INTO balance_adjustments(user_id,amount,note) VALUES(?,?,?)').run(cid,delta,note);})();res.json({ok:true});});
-app.get('/api/admin/resellers',admin,(req,res)=>res.json(db.prepare("SELECT id,name,email,store_name,store_color,store_background,store_header_background,seller_name,whatsapp_channel,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months,created_at FROM users WHERE role='reseller' ORDER BY id DESC").all()));
+app.get('/api/admin/resellers',admin,(req,res)=>res.json(db.prepare(`SELECT r.id,r.name,r.email,r.store_name,r.store_color,r.store_background,r.store_header_background,r.seller_name,r.whatsapp_channel,r.reseller_slug,r.reseller_status,r.reseller_expires_at,r.reseller_plan_months,r.created_at,
+ (SELECT COUNT(DISTINCT c.id) FROM users c WHERE c.role='customer' AND (c.reseller_id=r.id OR EXISTS(SELECT 1 FROM reseller_purchases rp0 WHERE rp0.user_id=c.id AND rp0.reseller_id=r.id))) AS client_count
+ FROM users r WHERE r.role='reseller' ORDER BY r.id DESC`).all()));
 app.get('/api/admin/reseller-requests',admin,(req,res)=>res.json(db.prepare("SELECT rr.id,rr.name,rr.email,rr.plan_months,rr.amount,rr.status,rr.created_at,rr.reviewed_at,rr.verification_deadline,rr.receipt,rr.receipt_mime,pm.name payment_method_name,pm.account payment_method_account FROM reseller_requests rr LEFT JOIN payment_methods pm ON pm.id=rr.payment_method_id ORDER BY rr.id DESC").all()));
 function seedResellerCatalog(resellerId){
  const products=db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id").all();
@@ -549,12 +556,16 @@ app.post('/api/admin/reseller-files/:id/replace',admin,upload.single('file'),(re
 app.delete('/api/admin/reseller-files/:id',admin,(req,res)=>{const f=db.prepare("SELECT * FROM reseller_files WHERE id=?").get(req.params.id);if(!f)return res.status(404).json({error:'Archivo no encontrado.'});try{const fp=path.join(UPLOAD_DIR,path.basename(f.url||''));if(fs.existsSync(fp))fs.unlinkSync(fp)}catch(e){}db.prepare("DELETE FROM reseller_files WHERE id=?").run(f.id);res.json({ok:true});});
 app.post('/api/admin/users/:id/password',admin,async(req,res)=>{const id=Number(req.params.id),password=String(req.body?.password||'');if(!id||password.length<8)return res.status(400).json({error:'La nueva contraseña debe tener 8 caracteres o más.'});const u=db.prepare("SELECT id,role FROM users WHERE id=?").get(id);if(!u)return res.status(404).json({error:'Usuario no encontrado.'});const hash=await bcrypt.hash(password,12);db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hash,id);res.json({ok:true,message:'Contraseña actualizada. Por seguridad, la contraseña original no puede mostrarse.'});});
 app.get("/api/admin/data",admin,(req,res)=>res.json({
- users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users ORDER BY id DESC").all(),
+ // En el panel principal del dueño solo aparecen sus clientes directos.
+ // Los clientes vinculados a un revendedor se administran dentro de ese revendedor.
+ users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users WHERE role='customer' AND (reseller_id IS NULL OR reseller_id=0) ORDER BY id DESC").all(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
- topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id ORDER BY t.id DESC").all(),
- purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id ORDER BY pu.id DESC").all(),
+ topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0) ORDER BY t.id DESC").all(),
+ purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0) ORDER BY pu.id DESC").all(),
  compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all(),
- resellers:db.prepare("SELECT id,name,email,store_name,store_color,store_background,store_header_background,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months,created_at FROM users WHERE role='reseller' ORDER BY id DESC").all(),
+ resellers:db.prepare(`SELECT r.id,r.name,r.email,r.store_name,r.store_color,r.store_background,r.store_header_background,r.reseller_slug,r.reseller_status,r.reseller_expires_at,r.reseller_plan_months,r.created_at,
+   (SELECT COUNT(DISTINCT c.id) FROM users c WHERE c.role='customer' AND (c.reseller_id=r.id OR EXISTS(SELECT 1 FROM reseller_purchases rp0 WHERE rp0.user_id=c.id AND rp0.reseller_id=r.id))) AS client_count
+   FROM users r WHERE r.role='reseller' ORDER BY r.id DESC`).all(),
  reseller_requests:db.prepare("SELECT rr.id,rr.name,rr.email,rr.plan_months,rr.amount,rr.status,rr.created_at,rr.reviewed_at,rr.user_id,rr.receipt,rr.receipt_mime,rr.verification_deadline,pm.name payment_method_name,pm.account payment_method_account FROM reseller_requests rr LEFT JOIN payment_methods pm ON pm.id=rr.payment_method_id ORDER BY rr.id DESC").all(),
  reseller_purchases:db.prepare("SELECT rp.*,u.name client_name,u.email client_email,r.name reseller_name,p.name product_name FROM reseller_purchases rp JOIN users u ON u.id=rp.user_id JOIN users r ON r.id=rp.reseller_id JOIN reseller_products p ON p.id=rp.product_id ORDER BY rp.id DESC").all()
 }));
