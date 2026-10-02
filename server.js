@@ -85,6 +85,43 @@ db.exec(`CREATE TABLE IF NOT EXISTS reseller_payment_methods(
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(reseller_id) REFERENCES users(id)
 )`);
+// Personalización y soporte por cuenta.
+{ const exists=db.prepare(`PRAGMA table_info(users)`).all().some(x=>x.name==='account_background'); if(!exists) db.exec(`ALTER TABLE users ADD COLUMN account_background TEXT DEFAULT ''`); }
+db.exec(`CREATE TABLE IF NOT EXISTS manual_deliveries(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  reseller_id INTEGER DEFAULT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Otros',
+  url TEXT NOT NULL,
+  original_name TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS support_threads(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL,
+  seller_id INTEGER NOT NULL DEFAULT 0,
+  seller_role TEXT NOT NULL DEFAULT 'owner',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(customer_id,seller_id,seller_role),
+  FOREIGN KEY(customer_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS support_messages(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id INTEGER NOT NULL,
+  sender_type TEXT NOT NULL,
+  sender_user_id INTEGER DEFAULT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  read_at TEXT DEFAULT NULL,
+  FOREIGN KEY(thread_id) REFERENCES support_threads(id) ON DELETE CASCADE,
+  FOREIGN KEY(sender_user_id) REFERENCES users(id)
+);`);
+
 // // Campos adicionales para solicitudes de revendedor ligadas a una cuenta de cliente existente.
 for (const [col, type] of [['user_id',"INTEGER DEFAULT NULL"],['receipt',"TEXT DEFAULT ''"],['receipt_mime',"TEXT DEFAULT ''"],['payment_method_id',"INTEGER DEFAULT NULL"],['verification_deadline',"TEXT DEFAULT ''"]]) {
   const exists = db.prepare(`PRAGMA table_info(reseller_requests)`).all().some(x => x.name === col);
@@ -288,7 +325,7 @@ const DEFAULT_SETTINGS={
  compatibility_notice:"La compatibilidad se consulta según las reglas configuradas en el panel.",
  whatsapp_channel:"https://whatsapp.com/channel/0029VbB1aAQDp2Q5F3dUDH3S",
  whatsapp_support:"https://wa.me/message/YXZINHSERCDNP1",
- main_store_name:"ALFRED IOS STORE",main_store_color:"#f7c94b",main_background:"/assets/alfred-ios-stores-luxury-bg.png",main_header_background:""
+ main_store_name:"ALFRED IOS STORE",main_store_color:"#f7c94b",main_background:"/assets/alfred-ios-stores-luxury-bg.png",main_header_background:"",account_background:"/assets/alfred-ios-stores-luxury-bg.png"
 };
 for(const [k,v] of Object.entries(DEFAULT_SETTINGS)) db.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").run(k,v);
 // V19: apply the new owner store/panel background once, without affecting future edits.
@@ -299,7 +336,7 @@ if(!db.prepare("SELECT 1 FROM settings WHERE key=?").get("background_v19_applied
 function getSettings(){const out={...DEFAULT_SETTINGS};for(const r of db.prepare("SELECT key,value FROM settings").all())out[r.key]=r.value;return out;}
 app.get("/api/settings",(req,res)=>res.json(getSettings()));
 app.post("/api/admin/settings",admin,(req,res)=>{
- const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel','whatsapp_support','main_background','main_store_name','main_store_color','main_header_background'];
+ const allowed=['payment_method','payment_account','delivery_notice','whatsapp_channel','whatsapp_support','main_background','main_store_name','main_store_color','main_header_background','account_background'];
  const up=db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
  for(const k of allowed){if(req.body&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
  for(const k of Object.keys(req.body||{})){if(/^category_image_[A-Za-z0-9 _-]+$/.test(k)&&req.body[k]!==undefined)up.run(k,String(req.body[k]).trim());}
@@ -370,8 +407,8 @@ app.get('/api/reseller/my-request',user,(req,res)=>{
 });
 app.get('/api/reseller/store/:slug',(req,res)=>{const u=db.prepare("SELECT id,name,store_name,store_color,store_background,store_header_background,reseller_status,reseller_expires_at,reseller_plan_months,reseller_slug FROM users WHERE reseller_slug=? AND role='reseller'").get(req.params.slug);if(!u)return res.status(404).json({error:'Tienda no encontrada.'});if(u.reseller_status!=='active'||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'Esta tienda está temporalmente inactiva.'});const payments=db.prepare("SELECT id,name,account,details FROM reseller_payment_methods WHERE reseller_id=? AND active=1 ORDER BY sort_order,id").all(u.id);res.json({id:u.id,name:u.name,seller_name:u.seller_name||u.name,whatsapp_channel:u.whatsapp_channel||'',store_name:u.store_name||u.name,store_color:u.store_color||'#f7c94b',store_background:u.store_background||'',store_header_background:u.store_header_background||'',payment_methods:payments,expires_at:u.reseller_expires_at,slug:u.reseller_slug});});
 app.get('/api/reseller/store/:slug/products',(req,res)=>{const u=db.prepare("SELECT id,reseller_status,reseller_expires_at FROM users WHERE reseller_slug=? AND role='reseller'").get(req.params.slug);if(!u)return res.status(404).json({error:'Tienda no encontrada.'});if(u.reseller_status!=='active'||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:'Esta tienda está temporalmente inactiva.'});res.json(db.prepare("SELECT id,name,category,price,description,image,created_at FROM reseller_products WHERE reseller_id=? AND active=1 ORDER BY id DESC").all(u.id));});
-app.post('/api/reseller/settings',reseller,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim(),background=String(req.body?.store_background||'').trim().slice(0,500),headerBackground=String(req.body?.store_header_background||'').trim().slice(0,500),sellerName=String(req.body?.seller_name||'').trim().slice(0,80),whatsapp=String(req.body?.whatsapp_channel||'').trim().slice(0,500);if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Nombre y color válidos son obligatorios.'});db.prepare("UPDATE users SET store_name=?,store_color=?,store_background=?,store_header_background=?,seller_name=?,whatsapp_channel=? WHERE id=?").run(name,color,background,headerBackground,sellerName,whatsapp,req.auth.userId);res.json({ok:true,store_name:name,store_color:color,store_background:background,store_header_background:headerBackground,seller_name:sellerName,whatsapp_channel:whatsapp});});
-app.get('/api/reseller/me',reseller,(req,res)=>{const u=db.prepare("SELECT id,name,email,store_name,store_color,store_background,store_header_background,seller_name,whatsapp_channel,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months FROM users WHERE id=?").get(req.auth.userId);res.json(u);});
+app.post('/api/reseller/settings',reseller,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim(),background=String(req.body?.store_background||'').trim().slice(0,500),headerBackground=String(req.body?.store_header_background||'').trim().slice(0,500),accountBackground=String(req.body?.account_background||'').trim().slice(0,500),sellerName=String(req.body?.seller_name||'').trim().slice(0,80),whatsapp=String(req.body?.whatsapp_channel||'').trim().slice(0,500);if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Nombre y color válidos son obligatorios.'});db.prepare("UPDATE users SET store_name=?,store_color=?,store_background=?,store_header_background=?,account_background=?,seller_name=?,whatsapp_channel=? WHERE id=?").run(name,color,background,headerBackground,accountBackground,sellerName,whatsapp,req.auth.userId);res.json({ok:true,store_name:name,store_color:color,store_background:background,store_header_background:headerBackground,account_background:accountBackground,seller_name:sellerName,whatsapp_channel:whatsapp});});
+app.get('/api/reseller/me',reseller,(req,res)=>{const u=db.prepare("SELECT id,name,email,store_name,store_color,store_background,store_header_background,account_background,seller_name,whatsapp_channel,reseller_slug,reseller_status,reseller_expires_at,reseller_plan_months FROM users WHERE id=?").get(req.auth.userId);res.json(u);});
 app.get('/api/reseller/payment-methods',reseller,(req,res)=>res.json(db.prepare("SELECT id,name,account,details,active,sort_order FROM reseller_payment_methods WHERE reseller_id=? ORDER BY sort_order,id").all(req.auth.userId)));
 app.post('/api/reseller/payment-methods',reseller,(req,res)=>{const name=String(req.body?.name||'').trim().slice(0,80),account=String(req.body?.account||'').trim().slice(0,120),details=String(req.body?.details||'').trim().slice(0,300);if(!name||!account)return res.status(400).json({error:'Nombre y cuenta/dato de pago son obligatorios.'});const max=db.prepare("SELECT COALESCE(MAX(sort_order),0) m FROM reseller_payment_methods WHERE reseller_id=?").get(req.auth.userId).m;const x=db.prepare("INSERT INTO reseller_payment_methods(reseller_id,name,account,details,sort_order) VALUES(?,?,?,?,?)").run(req.auth.userId,name,account,details,Number(max)+1);res.json({ok:true,id:x.lastInsertRowid});});
 app.post('/api/reseller/payment-methods/:id',reseller,(req,res)=>{const id=Number(req.params.id),name=String(req.body?.name||'').trim().slice(0,80),account=String(req.body?.account||'').trim().slice(0,120),details=String(req.body?.details||'').trim().slice(0,300),active=req.body?.active===false?0:1;if(!id||!name||!account)return res.status(400).json({error:'Datos inválidos.'});const r=db.prepare("UPDATE reseller_payment_methods SET name=?,account=?,details=?,active=? WHERE id=? AND reseller_id=?").run(name,account,details,active,id,req.auth.userId);if(!r.changes)return res.status(404).json({error:'Método no encontrado.'});res.json({ok:true});});
@@ -422,6 +459,7 @@ app.get('/api/reseller/customers/:id/purchases',reseller,(req,res)=>{
  if(!belongs)return res.status(404).json({error:'Cliente no encontrado.'});
  res.json(db.prepare(`SELECT rp.id,rp.price,rp.created_at,p.name product_name,p.category,rf.original_name file_name,rf.url file_url FROM reseller_purchases rp JOIN reseller_products p ON p.id=rp.product_id LEFT JOIN reseller_files rf ON rf.id=p.file_id WHERE rp.user_id=? AND rp.reseller_id=? ORDER BY rp.id DESC`).all(customerId,req.auth.userId));
 });
+app.get('/api/reseller/customers/:id/files',reseller,(req,res)=>{const customerId=Number(req.params.id),rid=req.auth.userId;const belongs=db.prepare(`SELECT u.id FROM users u WHERE u.id=? AND u.role='customer' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rx WHERE rx.user_id=u.id AND rx.reseller_id=?))`).get(customerId,rid,rid);if(!belongs)return res.status(404).json({error:'Cliente no encontrado.'});res.json(db.prepare(`SELECT rp.id item_id,rp.created_at,p.name,rp.price,p.category,'purchase' source,'' note,rf.url file_url,rf.original_name file_name,'' ipa_url,'' ipa_name,'' mega_url,'' mediafire_url,'' file_password FROM reseller_purchases rp JOIN reseller_products p ON p.id=rp.product_id LEFT JOIN reseller_files rf ON rf.id=p.file_id WHERE rp.user_id=? AND rp.reseller_id=? UNION ALL SELECT -md.id item_id,md.created_at,md.name,0 price,md.category,'manual' source,md.note,md.url file_url,md.original_name file_name,'' ipa_url,'' ipa_name,'' mega_url,'' mediafire_url,'' file_password FROM manual_deliveries md WHERE md.user_id=? AND md.reseller_id=? ORDER BY item_id DESC`).all(customerId,rid,customerId,rid));});
 app.get('/api/reseller/files',reseller,(req,res)=>res.json(db.prepare("SELECT rf.*,rp.name product_name FROM reseller_files rf LEFT JOIN reseller_products rp ON rp.file_id=rf.id WHERE rf.reseller_id=? ORDER BY rf.id DESC").all(req.auth.userId)));
 app.get('/api/reseller/sales',reseller,(req,res)=>res.json(db.prepare(`SELECT rp.id,rp.price,rp.created_at,u.name client_name,u.email client_email,p.name product_name,p.category,rf.original_name file_name FROM reseller_purchases rp JOIN users u ON u.id=rp.user_id JOIN reseller_products p ON p.id=rp.product_id LEFT JOIN reseller_files rf ON rf.id=p.file_id WHERE rp.reseller_id=? ORDER BY rp.id DESC`).all(req.auth.userId)));
 app.post('/api/reseller/upload-image',reseller,upload.single('file'),(req,res)=>{if(!req.file)return res.status(400).json({error:'No se recibió ninguna imagen.'});const mime=String(req.file.mimetype||'');if(!mime.startsWith('image/')){try{fs.unlinkSync(req.file.path)}catch(e){}return res.status(400).json({error:'Solo se permiten imágenes.'});}const ext=path.extname(req.file.originalname||'').toLowerCase()||'.jpg';const safe='reseller-img-'+req.auth.userId+'-'+Date.now()+ext;const target=path.join(UPLOAD_DIR,safe);fs.renameSync(req.file.path,target);res.json({ok:true,url:'/uploads/'+safe,name:req.file.originalname||safe});});
@@ -487,8 +525,17 @@ app.post("/api/login",rateLimit({windowMs:15*60*1000,max:12,keyPrefix:"login",me
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/me",user,(req,res)=>{
- const u=db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_status,reseller_expires_at,reseller_slug,store_name,store_color,reseller_plan_months FROM users WHERE id=?").get(req.auth.userId);
- res.json({...u,compatibility:compatibilityFor(u.ios_version)});
+ const u=db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_status,reseller_expires_at,reseller_slug,store_name,store_color,reseller_plan_months,reseller_id,seller_name,whatsapp_channel,account_background FROM users WHERE id=?").get(req.auth.userId);
+ if(!u)return res.status(404).json({error:'Cuenta no encontrada.'});
+ const ownerSettings=getSettings();
+ let accountStoreName=ownerSettings.main_store_name||'ALFRED IOS STORE', accountBackground=ownerSettings.account_background||ownerSettings.main_background||'', sellerName=ownerSettings.main_store_name||'ALFRED IOS STORE', sellerWhatsapp=ownerSettings.whatsapp_support||'';
+ if(u.role==='reseller'){
+   accountStoreName=u.store_name||u.name; accountBackground=u.account_background||u.store_background||accountBackground; sellerName=u.seller_name||u.name; sellerWhatsapp=u.whatsapp_channel||'';
+ }else if(u.reseller_id){
+   const r=db.prepare("SELECT store_name,store_background,account_background,seller_name,whatsapp_channel FROM users WHERE id=? AND role='reseller'").get(u.reseller_id);
+   if(r){ accountStoreName=r.store_name||accountStoreName; accountBackground=r.account_background||r.store_background||accountBackground; sellerName=r.seller_name||accountStoreName; sellerWhatsapp=r.whatsapp_channel||sellerWhatsapp; }
+ }
+ res.json({...u,account_store_name:accountStoreName,account_background:accountBackground,seller_name:sellerName,seller_whatsapp:sellerWhatsapp,compatibility:compatibilityFor(u.ios_version)});
 });
 app.get("/api/my-device",user,(req,res)=>res.json(db.prepare("SELECT iphone_model,ios_version FROM users WHERE id=?").get(req.auth.userId)));
 app.post("/api/my-device",user,(req,res)=>{
@@ -507,7 +554,10 @@ app.get("/api/my-products",user,(req,res)=>{
  UNION ALL
  SELECT rp.id purchase_id,'delivered' status,rp.created_at purchased_at,rp.product_id product_id,p.name,p.price,p.category,'' mediafire_url,'' mega_url,'' file_password,rf.url file_url,rf.original_name file_name,'' image,'' video,'' ipa_url,'' ipa_name,r.store_name reseller_store
  FROM reseller_purchases rp JOIN reseller_products p ON p.id=rp.product_id JOIN users r ON r.id=rp.reseller_id LEFT JOIN reseller_files rf ON rf.id=p.file_id WHERE rp.user_id=?
- ORDER BY purchase_id DESC`).all(req.auth.userId,req.auth.userId);
+ UNION ALL
+ SELECT -md.id purchase_id,'delivered' status,md.created_at purchased_at,0 product_id,md.name,0 price,md.category,'' mediafire_url,'' mega_url,'' file_password,md.url file_url,md.original_name file_name,'' image,'' video,'' ipa_url,'' ipa_name,'' reseller_store
+ FROM manual_deliveries md WHERE md.user_id=?
+ ORDER BY purchase_id DESC`).all(req.auth.userId,req.auth.userId,req.auth.userId);
  res.json(rows);
 });
 app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
@@ -562,6 +612,55 @@ app.post("/api/buy-cart",rateLimit({windowMs:60*1000,max:15,keyPrefix:"buy-cart"
  res.json({ok:true,message:"Compra realizada. Todos los archivos ya están disponibles en tu cuenta.",delivered:true,total,count:products.length});
 });
 
+// ===== ENTREGA MANUAL DE ARCHIVOS =====
+function allowedDeliveryFile(req,res){
+ if(!req.file)return res.status(400).json({error:'No se recibió ningún archivo.'});
+ const ext=path.extname(req.file.originalname||'').toLowerCase();
+ const allowed=['.ipa','.zip','.rar','.7z','.pdf','.dmg'];
+ if(!allowed.includes(ext)){try{fs.unlinkSync(req.file.path)}catch(e){};res.status(400).json({error:'Tipo de archivo no permitido. Usa IPA, ZIP, RAR, 7Z, PDF o DMG.'});return false;}
+ return true;
+}
+function finalizeManualFile(req,userId,resellerId,category,note){
+ const original=path.basename(req.file.originalname||'archivo');
+ const safe=original.replace(/[^a-zA-Z0-9._ -]/g,'_').replace(/\s+/g,' ').trim()||'archivo';
+ const target=path.join(UPLOAD_DIR,'manual-'+(resellerId||'owner')+'-'+Date.now()+'-'+safe);
+ fs.renameSync(req.file.path,target);
+ const x=db.prepare("INSERT INTO manual_deliveries(user_id,reseller_id,name,category,url,original_name,note) VALUES(?,?,?,?,?,?,?)").run(userId,resellerId||null,original.replace(/\.[^.]+$/,''),category||'Otros','/uploads/'+path.basename(target),original,note||'');
+ return {id:x.lastInsertRowid,url:'/uploads/'+path.basename(target),name:original};
+}
+app.get('/api/admin/customers/:id/files',admin,(req,res)=>{const cid=Number(req.params.id);const u=db.prepare("SELECT id,role,reseller_id FROM users WHERE id=?").get(cid);if(!u||u.role!=='customer'||u.reseller_id)return res.status(404).json({error:'Cliente no encontrado en la cartera principal.'});res.json(db.prepare(`SELECT pu.id item_id,pu.created_at,p.name,pu.price,p.category,'purchase' source,'' note,p.file_url,p.file_name,p.ipa_url,p.ipa_name,p.mega_url,p.mediafire_url,p.file_password FROM purchases pu JOIN products p ON p.id=pu.product_id WHERE pu.user_id=? UNION ALL SELECT -md.id item_id,md.created_at,md.name,0 price,md.category,'manual' source,md.note,md.url file_url,md.original_name file_name,'' ipa_url,'' ipa_name,'' mega_url,'' mediafire_url,'' file_password FROM manual_deliveries md WHERE md.user_id=? AND md.reseller_id IS NULL ORDER BY item_id DESC`).all(cid,cid));});
+app.post('/api/admin/customers/:id/manual-file',admin,upload.single('file'),(req,res)=>{
+ if(!allowedDeliveryFile(req,res))return;
+ const cid=Number(req.params.id);const u=db.prepare("SELECT id,role,reseller_id FROM users WHERE id=?").get(cid);
+ if(!u||u.role!=='customer'||u.reseller_id)return res.status(404).json({error:'Cliente no encontrado en la cartera principal.'});
+ const category=String(req.body?.category||'Otros').trim().slice(0,60),note=String(req.body?.note||'').trim().slice(0,300);
+ try{res.json({ok:true,...finalizeManualFile(req,cid,null,category,note)});}catch(e){try{fs.unlinkSync(req.file.path)}catch(_){};res.status(500).json({error:'No se pudo entregar el archivo.'});}
+});
+app.post('/api/reseller/customers/:id/manual-file',reseller,upload.single('file'),(req,res)=>{
+ if(!allowedDeliveryFile(req,res))return;
+ const cid=Number(req.params.id),rid=req.auth.userId;
+ const u=db.prepare(`SELECT u.id,u.role,u.reseller_id FROM users u WHERE u.id=? AND u.role='customer' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?))`).get(cid,rid,rid);
+ if(!u)return res.status(404).json({error:'Cliente no encontrado en tu tienda.'});
+ const category=String(req.body?.category||'Otros').trim().slice(0,60),note=String(req.body?.note||'').trim().slice(0,300);
+ try{res.json({ok:true,...finalizeManualFile(req,cid,rid,category,note)});}catch(e){try{fs.unlinkSync(req.file.path)}catch(_){};res.status(500).json({error:'No se pudo entregar el archivo.'});}
+});
+
+// ===== CHAT CON EL VENDEDOR =====
+function sellerContextForCustomer(userId){
+ const u=db.prepare("SELECT id,name,email,reseller_id,role FROM users WHERE id=?").get(userId);if(!u)return null;
+ if(u.reseller_id){const r=db.prepare("SELECT id,name,store_name,seller_name,whatsapp_channel FROM users WHERE id=? AND role='reseller'").get(u.reseller_id);if(r)return {customer:u,sellerId:r.id,sellerRole:'reseller',sellerName:r.seller_name||r.store_name||r.name};}
+ const settings=getSettings();return {customer:u,sellerId:0,sellerRole:'owner',sellerName:settings.main_store_name||'ALFRED IOS STORE'};
+}
+function getOrCreateThread(customerId,sellerId,sellerRole){let t=db.prepare("SELECT * FROM support_threads WHERE customer_id=? AND seller_id=? AND seller_role=?").get(customerId,sellerId,sellerRole);if(!t){const x=db.prepare("INSERT INTO support_threads(customer_id,seller_id,seller_role) VALUES(?,?,?)").run(customerId,sellerId,sellerRole);t=db.prepare("SELECT * FROM support_threads WHERE id=?").get(x.lastInsertRowid);}return t;}
+app.get('/api/support/thread',user,(req,res)=>{const ctx=sellerContextForCustomer(req.auth.userId);if(!ctx)return res.status(404).json({error:'Cuenta no encontrada.'});const t=getOrCreateThread(ctx.customer.id,ctx.sellerId,ctx.sellerRole);const messages=db.prepare("SELECT id,sender_type,message,created_at,read_at FROM support_messages WHERE thread_id=? ORDER BY id ASC").all(t.id);db.prepare("UPDATE support_messages SET read_at=CURRENT_TIMESTAMP WHERE thread_id=? AND sender_type='seller' AND read_at IS NULL").run(t.id);res.json({thread:t,seller_name:ctx.sellerName,messages});});
+app.post('/api/support/thread',user,(req,res)=>{const ctx=sellerContextForCustomer(req.auth.userId);if(!ctx)return res.status(404).json({error:'Cuenta no encontrada.'});const message=String(req.body?.message||'').trim().slice(0,2000);if(!message)return res.status(400).json({error:'Escribe un mensaje.'});const t=getOrCreateThread(ctx.customer.id,ctx.sellerId,ctx.sellerRole);db.prepare("INSERT INTO support_messages(thread_id,sender_type,sender_user_id,message) VALUES(?,?,?,?)").run(t.id,'customer',ctx.customer.id,message);db.prepare("UPDATE support_threads SET updated_at=CURRENT_TIMESTAMP,status='open' WHERE id=?").run(t.id);res.json({ok:true});});
+app.get('/api/reseller/support/threads',reseller,(req,res)=>res.json(db.prepare(`SELECT t.id,t.customer_id,t.status,t.created_at,t.updated_at,u.name customer_name,u.email customer_email,(SELECT message FROM support_messages m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) last_message,(SELECT COUNT(*) FROM support_messages m WHERE m.thread_id=t.id AND m.sender_type='customer' AND m.read_at IS NULL) unread FROM support_threads t JOIN users u ON u.id=t.customer_id WHERE t.seller_id=? AND t.seller_role='reseller' ORDER BY t.updated_at DESC`).all(req.auth.userId)));
+app.get('/api/reseller/support/threads/:id',reseller,(req,res)=>{const t=db.prepare("SELECT * FROM support_threads WHERE id=? AND seller_id=? AND seller_role='reseller'").get(Number(req.params.id),req.auth.userId);if(!t)return res.status(404).json({error:'Chat no encontrado.'});const messages=db.prepare("SELECT id,sender_type,message,created_at,read_at FROM support_messages WHERE thread_id=? ORDER BY id ASC").all(t.id);db.prepare("UPDATE support_messages SET read_at=CURRENT_TIMESTAMP WHERE thread_id=? AND sender_type='customer' AND read_at IS NULL").run(t.id);res.json({thread:t,messages});});
+app.post('/api/reseller/support/threads/:id',reseller,(req,res)=>{const t=db.prepare("SELECT * FROM support_threads WHERE id=? AND seller_id=? AND seller_role='reseller'").get(Number(req.params.id),req.auth.userId);if(!t)return res.status(404).json({error:'Chat no encontrado.'});const message=String(req.body?.message||'').trim().slice(0,2000);if(!message)return res.status(400).json({error:'Escribe un mensaje.'});db.prepare("INSERT INTO support_messages(thread_id,sender_type,sender_user_id,message) VALUES(?,?,?,?)").run(t.id,'seller',req.auth.userId,message);db.prepare("UPDATE support_threads SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(t.id);res.json({ok:true});});
+app.get('/api/admin/support/threads',admin,(req,res)=>res.json(db.prepare(`SELECT t.id,t.customer_id,t.seller_id,t.seller_role,t.status,t.created_at,t.updated_at,u.name customer_name,u.email customer_email,(SELECT message FROM support_messages m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) last_message,(SELECT COUNT(*) FROM support_messages m WHERE m.thread_id=t.id AND m.sender_type='customer' AND m.read_at IS NULL) unread FROM support_threads t JOIN users u ON u.id=t.customer_id ORDER BY t.updated_at DESC`).all()));
+app.get('/api/admin/support/threads/:id',admin,(req,res)=>{const t=db.prepare("SELECT * FROM support_threads WHERE id=?").get(req.params.id);if(!t)return res.status(404).json({error:'Chat no encontrado.'});const messages=db.prepare("SELECT id,sender_type,message,created_at,read_at FROM support_messages WHERE thread_id=? ORDER BY id ASC").all(t.id);db.prepare("UPDATE support_messages SET read_at=CURRENT_TIMESTAMP WHERE thread_id=? AND sender_type='customer' AND read_at IS NULL").run(t.id);res.json({thread:t,messages});});
+app.post('/api/admin/support/threads/:id',admin,(req,res)=>{const t=db.prepare("SELECT * FROM support_threads WHERE id=?").get(req.params.id);if(!t)return res.status(404).json({error:'Chat no encontrado.'});const message=String(req.body?.message||'').trim().slice(0,2000);if(!message)return res.status(400).json({error:'Escribe un mensaje.'});db.prepare("INSERT INTO support_messages(thread_id,sender_type,sender_user_id,message) VALUES(?,?,NULL,?)").run(t.id,'seller',message);db.prepare("UPDATE support_threads SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(t.id);res.json({ok:true});});
+
 app.post("/api/admin/login",rateLimit({windowMs:15*60*1000,max:5,keyPrefix:"admin-login",message:"Demasiados intentos de acceso al panel. Espera 15 minutos."}),(req,res)=>{
  if(String(req.body?.email||"").trim().toLowerCase()===ADMIN_EMAIL&&String(req.body?.password||"")===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+31536000000});return res.json({ok:true});}
  res.status(401).json({error:"Credenciales incorrectas."});
@@ -600,10 +699,10 @@ function seedResellerCatalog(resellerId){
    if(fileId)db.prepare("UPDATE reseller_files SET product_id=? WHERE id=?").run(x.lastInsertRowid,fileId);
  }
 }
-app.post('/api/admin/reseller-requests/:id/approve',admin,(req,res)=>{const q=db.prepare("SELECT * FROM reseller_requests WHERE id=? AND status='pending'").get(req.params.id);if(!q)return res.status(404).json({error:'Solicitud no encontrada.'});const u=db.prepare("SELECT * FROM users WHERE id=?").get(q.user_id);if(!u)return res.status(404).json({error:'La cuenta del cliente no existe.'});if(u.role!=='customer')return res.status(409).json({error:'La cuenta ya no es una cuenta de cliente.'});const slug=uniqueSlug(u.name),now=new Date(),expires=addMonths(now,q.plan_months),support=db.prepare("SELECT value FROM settings WHERE key='whatsapp_support'").get()?.value||'';db.transaction(()=>{db.prepare("UPDATE users SET role='reseller',reseller_status='active',reseller_expires_at=?,reseller_slug=?,store_name='ALFRED IOS STORE',store_color='#f7c94b',reseller_plan_months=? WHERE id=?").run(expires,slug,q.plan_months,u.id);seedResellerCatalog(u.id);db.prepare("UPDATE reseller_requests SET status='approved',user_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").run(u.id,q.id);})();res.json({ok:true,slug,expires,store_url:'/tienda/'+encodeURIComponent(slug),panel_url:'/revendedor-panel',support_url:support});});
+app.post('/api/admin/reseller-requests/:id/approve',admin,(req,res)=>{const q=db.prepare("SELECT * FROM reseller_requests WHERE id=? AND status='pending'").get(req.params.id);if(!q)return res.status(404).json({error:'Solicitud no encontrada.'});const u=db.prepare("SELECT * FROM users WHERE id=?").get(q.user_id);if(!u)return res.status(404).json({error:'La cuenta del cliente no existe.'});if(u.role!=='customer')return res.status(409).json({error:'La cuenta ya no es una cuenta de cliente.'});const slug=uniqueSlug(u.name),now=new Date(),expires=addMonths(now,q.plan_months),support=db.prepare("SELECT value FROM settings WHERE key='whatsapp_support'").get()?.value||'';db.transaction(()=>{db.prepare("UPDATE users SET role='reseller',reseller_status='active',reseller_expires_at=?,reseller_slug=?,store_name='ALFRED IOS STORE',store_color='#f7c94b',account_background='',reseller_plan_months=? WHERE id=?").run(expires,slug,q.plan_months,u.id);seedResellerCatalog(u.id);db.prepare("UPDATE reseller_requests SET status='approved',user_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").run(u.id,q.id);})();res.json({ok:true,slug,expires,store_url:'/tienda/'+encodeURIComponent(slug),panel_url:'/revendedor-panel',support_url:support});});
 app.post('/api/admin/resellers/:id/renew',admin,(req,res)=>{const months=Number(req.body?.months);if(![1,2,3].includes(months))return res.status(400).json({error:'Solo se permiten 1, 2 o 3 meses.'});const u=db.prepare("SELECT * FROM users WHERE id=? AND role='reseller'").get(req.params.id);if(!u)return res.status(404).json({error:'Revendedor no encontrado.'});const base=u.reseller_expires_at&&new Date(u.reseller_expires_at).getTime()>Date.now()?u.reseller_expires_at:new Date().toISOString(),expires=addMonths(base,months);db.prepare("UPDATE users SET reseller_status='active',reseller_expires_at=?,reseller_plan_months=? WHERE id=?").run(expires,months,u.id);res.json({ok:true,expires});});
 app.post('/api/admin/resellers/:id/status',admin,(req,res)=>{const status=['active','suspended'].includes(req.body?.status)?req.body.status:'suspended';const r=db.prepare("UPDATE users SET reseller_status=? WHERE id=? AND role='reseller'").run(status,req.params.id);if(!r.changes)return res.status(404).json({error:'Revendedor no encontrado.'});res.json({ok:true});});
-app.post('/api/admin/resellers/:id/settings',admin,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim(),background=String(req.body?.store_background||'').trim().slice(0,500),headerBackground=String(req.body?.store_header_background||'').trim().slice(0,500),sellerName=String(req.body?.seller_name||'').trim().slice(0,80),whatsapp=String(req.body?.whatsapp_channel||'').trim().slice(0,500);if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Datos inválidos.'});const r=db.prepare("UPDATE users SET store_name=?,store_color=?,store_background=?,store_header_background=?,seller_name=?,whatsapp_channel=? WHERE id=? AND role='reseller'").run(name,color,background,headerBackground,sellerName,whatsapp,req.params.id);if(!r.changes)return res.status(404).json({error:'Revendedor no encontrado.'});res.json({ok:true});});
+app.post('/api/admin/resellers/:id/settings',admin,(req,res)=>{const name=String(req.body?.store_name||'').trim().slice(0,60),color=String(req.body?.store_color||'').trim(),background=String(req.body?.store_background||'').trim().slice(0,500),headerBackground=String(req.body?.store_header_background||'').trim().slice(0,500),accountBackground=String(req.body?.account_background||'').trim().slice(0,500),sellerName=String(req.body?.seller_name||'').trim().slice(0,80),whatsapp=String(req.body?.whatsapp_channel||'').trim().slice(0,500);if(!name||!/^#[0-9a-fA-F]{6}$/.test(color))return res.status(400).json({error:'Datos inválidos.'});const r=db.prepare("UPDATE users SET store_name=?,store_color=?,store_background=?,store_header_background=?,account_background=?,seller_name=?,whatsapp_channel=? WHERE id=? AND role='reseller'").run(name,color,background,headerBackground,accountBackground,sellerName,whatsapp,req.params.id);if(!r.changes)return res.status(404).json({error:'Revendedor no encontrado.'});res.json({ok:true});});
 app.get('/api/admin/resellers/:id/payment-methods',admin,(req,res)=>res.json(db.prepare("SELECT id,name,account,details,active,sort_order FROM reseller_payment_methods WHERE reseller_id=? ORDER BY sort_order,id").all(req.params.id)));
 app.post('/api/admin/resellers/:id/payment-methods',admin,(req,res)=>{const rid=Number(req.params.id),name=String(req.body?.name||'').trim().slice(0,80),account=String(req.body?.account||'').trim().slice(0,120),details=String(req.body?.details||'').trim().slice(0,300);if(!rid||!name||!account)return res.status(400).json({error:'Nombre y cuenta/dato de pago son obligatorios.'});const max=db.prepare("SELECT COALESCE(MAX(sort_order),0) m FROM reseller_payment_methods WHERE reseller_id=?").get(rid).m;const x=db.prepare("INSERT INTO reseller_payment_methods(reseller_id,name,account,details,sort_order) VALUES(?,?,?,?,?)").run(rid,name,account,details,Number(max)+1);res.json({ok:true,id:x.lastInsertRowid});});
 app.post('/api/admin/resellers/:id/payment-methods/:methodId',admin,(req,res)=>{const rid=Number(req.params.id),mid=Number(req.params.methodId),name=String(req.body?.name||'').trim().slice(0,80),account=String(req.body?.account||'').trim().slice(0,120),details=String(req.body?.details||'').trim().slice(0,300),active=req.body?.active===false?0:1;if(!rid||!mid||!name||!account)return res.status(400).json({error:'Datos inválidos.'});const r=db.prepare("UPDATE reseller_payment_methods SET name=?,account=?,details=?,active=? WHERE id=? AND reseller_id=?").run(name,account,details,active,mid,rid);if(!r.changes)return res.status(404).json({error:'Método no encontrado.'});res.json({ok:true});});
