@@ -7,26 +7,11 @@ const crypto=require("crypto");
 const Database=require("better-sqlite3");
 
 const app=express();
-app.set("trust proxy", 1);
 const PORT=process.env.PORT||10000;
 const DATA_ROOT=process.env.RAILWAY_VOLUME_MOUNT_PATH||path.join(__dirname,"data");
 const DB_PATH=process.env.DB_PATH||path.join(DATA_ROOT,"store.db");
-const ADMIN_EMAIL=String(process.env.ADMIN_EMAIL||"").trim().toLowerCase();
-const ADMIN_PASSWORD=String(process.env.ADMIN_PASSWORD||"");
-const SESSION_SECRET=String(process.env.SESSION_SECRET||"");
-
-// Seguridad de producción: nunca arranques con credenciales/secretos de ejemplo.
-if(String(process.env.NODE_ENV||"").toLowerCase()==="production") {
-  if(!ADMIN_EMAIL || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ADMIN_EMAIL)) {
-    throw new Error("ADMIN_EMAIL no está configurado correctamente en Railway Variables.");
-  }
-  if(ADMIN_PASSWORD.length < 12 || ADMIN_PASSWORD === "CAMBIAR_ESTA_CLAVE") {
-    throw new Error("ADMIN_PASSWORD debe tener al menos 12 caracteres y configurarse en Railway Variables.");
-  }
-  if(SESSION_SECRET.length < 32 || SESSION_SECRET === "CAMBIAR_SESSION_SECRET") {
-    throw new Error("SESSION_SECRET debe tener al menos 32 caracteres y configurarse en Railway Variables.");
-  }
-}
+const ADMIN_EMAIL=process.env.ADMIN_EMAIL||"Blackblack1000130@gmail.com";
+const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"CAMBIAR_ESTA_CLAVE";
 fs.mkdirSync(path.dirname(DB_PATH),{recursive:true});
 const db=new Database(DB_PATH, { timeout: 10000 });
 db.pragma("journal_mode=WAL");
@@ -158,54 +143,11 @@ db.transaction(()=>{
   }
 })();
 
-// Límite de tamaño para cuerpos JSON/URL-encoded. Evita peticiones gigantes contra la API.
-app.use(express.json({limit:"256kb"}));
-app.use(express.urlencoded({extended:true,limit:"256kb"}));
-
-// Cabeceras de seguridad básicas. No sustituyen un WAF, pero reducen varios ataques comunes.
-app.disable("x-powered-by");
-app.use((req,res,next)=>{
-  res.setHeader("X-Content-Type-Options","nosniff");
-  res.setHeader("X-Frame-Options","DENY");
-  res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=()");
-  if(req.secure || req.headers["x-forwarded-proto"]==="https") {
-    res.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");
-  }
-  next();
-});
-
-// Rate limiting en memoria para reducir abuso de API/login.
-// Under Attack Mode de Railway sigue siendo la defensa para floods grandes.
-const rateBuckets=new Map();
-function clientIp(req){ return String(req.ip||req.headers["x-forwarded-for"]||req.socket.remoteAddress||"unknown").split(",")[0].trim(); }
-function rateLimit({windowMs,max,keyPrefix="global",message="Demasiadas solicitudes. Espera un momento e inténtalo de nuevo."}){
-  return (req,res,next)=>{
-    const key=`${keyPrefix}:${clientIp(req)}`;
-    const now=Date.now();
-    let b=rateBuckets.get(key);
-    if(!b || now-b.start>=windowMs) b={start:now,count:0};
-    b.count++; rateBuckets.set(key,b);
-    if(rateBuckets.size>10000){
-      for(const [k,v] of rateBuckets){ if(now-v.start>=windowMs) rateBuckets.delete(k); }
-    }
-    if(b.count>max){
-      res.setHeader("Retry-After",String(Math.max(1,Math.ceil((b.start+windowMs-now)/1000))));
-      return res.status(429).json({error:message});
-    }
-    next();
-  };
-}
-
-// Límite general para API y límites más estrictos para operaciones sensibles.
-const apiRateLimit=rateLimit({windowMs:60*1000,max:240,keyPrefix:"api"});
-app.use((req,res,next)=>{
-  if(req.path.startsWith("/api/")) return apiRateLimit(req,res,next);
-  next();
-});
-
-// Stateless authentication cookie: survives restarts. The cookie is signed and never stores passwords.
-
+app.use(express.json());
+app.use(express.urlencoded({extended:true}));
+// Stateless authentication cookie: survives Render Free restarts/sleeping instances.
+// The cookie is signed with SESSION_SECRET and does not store passwords.
+const SESSION_SECRET=process.env.SESSION_SECRET||"CAMBIAR_SESSION_SECRET";
 const COOKIE_NAME="alfred_auth";
 function signAuth(payload){
  const body=Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -435,7 +377,7 @@ app.get("/api/products",(req,res)=>{
  const rows=c&&c!=="Todas"?db.prepare("SELECT * FROM products WHERE active=1 AND lower(trim(category))=lower(trim(?)) ORDER BY id DESC").all(c):db.prepare("SELECT * FROM products WHERE active=1 ORDER BY id DESC").all();
  res.json(rows);
 });
-app.post("/api/register",rateLimit({windowMs:60*60*1000,max:10,keyPrefix:"register",message:"Demasiados intentos de registro desde esta conexión. Espera una hora e inténtalo de nuevo."}),async(req,res)=>{
+app.post("/api/register",async(req,res)=>{
  try{
    const name=String(req.body?.name||'').trim();
    const email=String(req.body?.email||'').trim().toLowerCase();
@@ -467,7 +409,7 @@ app.post("/api/register",rateLimit({windowMs:60*60*1000,max:10,keyPrefix:"regist
    res.status(500).json({error:"No se pudo crear la cuenta en este momento. Revisa la conexión e inténtalo nuevamente."});
  }
 });
-app.post("/api/login",rateLimit({windowMs:15*60*1000,max:12,keyPrefix:"login",message:"Demasiados intentos de inicio de sesión. Espera unos minutos e inténtalo de nuevo."}),async(req,res)=>{
+app.post("/api/login",async(req,res)=>{
  const loginEmail=String(req.body?.email||"").trim().toLowerCase();
  const resellerSlug=String(req.body?.reseller_slug||"").trim();
  const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(loginEmail);
@@ -511,7 +453,7 @@ app.get("/api/my-products",user,(req,res)=>{
  res.json(rows);
 });
 app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
-app.post("/api/topup",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"topup",message:"Demasiadas solicitudes de recarga. Espera unos minutos."}),user,upload.single("receipt"),(req,res)=>{
+app.post("/api/topup",user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
  const ext=path.extname(req.file.originalname||"").toLowerCase();
@@ -530,7 +472,7 @@ function requireDeviceForPurchase(userId){
  return !!(u&&String(u.iphone_model||'').trim()&&String(u.ios_version||'').trim());
 }
 
-app.post("/api/buy",rateLimit({windowMs:60*1000,max:30,keyPrefix:"buy",message:"Demasiadas solicitudes de compra. Espera un momento."}),user,(req,res)=>{
+app.post("/api/buy",user,(req,res)=>{
  const p=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.productId));
  if(!requireDeviceForPurchase(req.auth.userId))return res.status(400).json({error:"Antes de comprar debes indicar tu iPhone y tu versión de iOS en Mi cuenta."});
  if(!p||Number(p.purchase_enabled)===0)return res.status(404).json({error:"Producto no encontrado."});
@@ -543,7 +485,7 @@ app.post("/api/buy",rateLimit({windowMs:60*1000,max:30,keyPrefix:"buy",message:"
  res.json({ok:true,message:"Compra realizada. Tus archivos ya están disponibles en tu cuenta.",delivered:true});
 });
 
-app.post("/api/buy-cart",rateLimit({windowMs:60*1000,max:15,keyPrefix:"buy-cart",message:"Demasiadas solicitudes de compra. Espera un momento."}),user,(req,res)=>{
+app.post("/api/buy-cart",user,(req,res)=>{
  const ids=Array.isArray(req.body.productIds)?req.body.productIds.map(Number).filter(Number.isInteger):[];
  if(!ids.length)return res.status(400).json({error:"El carrito está vacío."});
  if(!requireDeviceForPurchase(req.auth.userId))return res.status(400).json({error:"Antes de comprar debes indicar tu iPhone y tu versión de iOS en Mi cuenta."});
@@ -562,8 +504,8 @@ app.post("/api/buy-cart",rateLimit({windowMs:60*1000,max:15,keyPrefix:"buy-cart"
  res.json({ok:true,message:"Compra realizada. Todos los archivos ya están disponibles en tu cuenta.",delivered:true,total,count:products.length});
 });
 
-app.post("/api/admin/login",rateLimit({windowMs:15*60*1000,max:5,keyPrefix:"admin-login",message:"Demasiados intentos de acceso al panel. Espera 15 minutos."}),(req,res)=>{
- if(String(req.body?.email||"").trim().toLowerCase()===ADMIN_EMAIL&&String(req.body?.password||"")===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+31536000000});return res.json({ok:true});}
+app.post("/api/admin/login",(req,res)=>{
+ if(req.body.email===ADMIN_EMAIL&&req.body.password===ADMIN_PASSWORD){setAuth(res,{admin:true,exp:Date.now()+31536000000});return res.json({ok:true});}
  res.status(401).json({error:"Credenciales incorrectas."});
 });
 app.post("/api/admin/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
