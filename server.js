@@ -55,6 +55,7 @@ for (const [col, type] of [['mega_url',"TEXT DEFAULT ''"],['file_password',"TEXT
 // Compatibilidad con bases de datos creadas por versiones anteriores.
 { const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'receipt_mime'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN receipt_mime TEXT DEFAULT ''`); }
 { const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'payment_method_id'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN payment_method_id INTEGER DEFAULT NULL`); }
+{ const exists=db.prepare(`PRAGMA table_info(topups)`).all().some(x => x.name === 'verification_deadline'); if(!exists) db.exec(`ALTER TABLE topups ADD COLUMN verification_deadline TEXT DEFAULT ''`); }
 { const exists=db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === 'store_background'); if(!exists) db.exec(`ALTER TABLE users ADD COLUMN store_background TEXT DEFAULT ''`);
   const existsHeader=db.prepare(`PRAGMA table_info(users)`).all().some(x => x.name === 'store_header_background'); if(!existsHeader) db.exec(`ALTER TABLE users ADD COLUMN store_header_background TEXT DEFAULT ''`); }
 for (const [col, type] of [['purchase_enabled','INTEGER DEFAULT 1'],['reseller_purchase_enabled','INTEGER DEFAULT 1']]) {
@@ -437,7 +438,7 @@ app.post('/api/reseller/customers/:id/balance',reseller,(req,res)=>{
 });
 app.get('/api/reseller/topups',reseller,(req,res)=>{
  const rid=req.auth.userId;
- res.json(db.prepare(`SELECT t.id,t.user_id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.status='pending' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?)) ORDER BY t.id DESC`).all(rid,rid));
+ res.json(db.prepare(`SELECT t.id,t.user_id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.verification_deadline,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.status='pending' AND (u.reseller_id=? OR EXISTS(SELECT 1 FROM reseller_purchases rp WHERE rp.user_id=u.id AND rp.reseller_id=?)) ORDER BY t.id DESC`).all(rid,rid));
 });
 app.post('/api/reseller/topup/:id/approve',reseller,(req,res)=>{
  const rid=req.auth.userId;
@@ -560,7 +561,7 @@ app.get("/api/my-products",user,(req,res)=>{
  ORDER BY purchase_id DESC`).all(req.auth.userId,req.auth.userId,req.auth.userId);
  res.json(rows);
 });
-app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
+app.get("/api/my-topups",user,(req,res)=>res.json(db.prepare("SELECT t.id,t.amount,t.receipt,t.receipt_mime,t.status,t.created_at,t.verification_deadline,t.payment_method_id,pm.name payment_method_name,pm.account payment_method_account FROM topups t LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE t.user_id=? ORDER BY t.id DESC").all(req.auth.userId)));
 app.post("/api/topup",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"topup",message:"Demasiadas solicitudes de recarga. Espera unos minutos."}),user,upload.single("receipt"),(req,res)=>{
  const amount=Number(req.body.amount);
  if(!Number.isInteger(amount)||amount<1||!req.file)return res.status(400).json({error:"Indica un monto y sube el comprobante."});
@@ -572,8 +573,9 @@ app.post("/api/topup",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"topup",me
  const paymentMethodId=req.body.payment_method_id?Number(req.body.payment_method_id):null;
  const paymentExists=paymentMethodId?db.prepare("SELECT id FROM payment_methods WHERE id=? AND active=1").get(paymentMethodId):null;
  if(paymentMethodId&&!paymentExists)return res.status(400).json({error:"Método de pago no válido."});
- db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime,payment_method_id) VALUES(?,?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+finalName,req.file.mimetype||"",paymentMethodId);
- res.json({ok:true,message:"Comprobante enviado. Queda pendiente de verificación."});
+ const verificationDeadline=new Date(Date.now()+2*60*60*1000).toISOString();
+ db.prepare("INSERT INTO topups(user_id,amount,receipt,receipt_mime,payment_method_id,verification_deadline) VALUES(?,?,?,?,?,?)").run(req.auth.userId,amount,"/uploads/"+finalName,req.file.mimetype||"",paymentMethodId,verificationDeadline);
+ res.json({ok:true,verification_deadline:verificationDeadline,message:"Comprobante enviado. Tienes una ventana estimada de 2 horas para su verificación."});
 });
 function requireDeviceForPurchase(userId){
  const u=db.prepare('SELECT iphone_model,ios_version FROM users WHERE id=?').get(userId);
@@ -715,10 +717,10 @@ app.post('/api/admin/users/:id/password',admin,async(req,res)=>{const id=Number(
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  // En el panel principal del dueño solo aparecen sus clientes directos.
  // Los clientes vinculados a un revendedor se administran dentro de ese revendedor.
- users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users WHERE role='customer' AND (reseller_id IS NULL OR reseller_id=0) ORDER BY id DESC").all(),
+ users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users u WHERE role='customer' AND (reseller_id IS NULL OR reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY id DESC").all(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
- topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0) ORDER BY t.id DESC").all(),
- purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0) ORDER BY pu.id DESC").all(),
+ topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY t.id DESC").all(),
+ purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY pu.id DESC").all(),
  compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all(),
  resellers:db.prepare(`SELECT r.id,r.name,r.email,r.store_name,r.store_color,r.store_background,r.store_header_background,r.reseller_slug,r.reseller_status,r.reseller_expires_at,r.reseller_plan_months,r.created_at,
    (SELECT COUNT(DISTINCT c.id) FROM users c WHERE c.role='customer' AND (c.reseller_id=r.id OR EXISTS(SELECT 1 FROM reseller_purchases rp0 WHERE rp0.user_id=c.id AND rp0.reseller_id=r.id))) AS client_count
