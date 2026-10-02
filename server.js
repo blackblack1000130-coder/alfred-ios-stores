@@ -284,15 +284,16 @@ app.use("/uploads",express.static(UPLOAD_DIR));
 function user(req,res,next){if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});next();}
 function admin(req,res,next){if(!req.auth||!req.auth.admin)return res.status(401).json({error:"Acceso de administrador requerido."});next();}
 function reseller(req,res,next){
- if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});
- // El creador puede abrir el panel de cualquier revendedor desde su propio panel.
- // Solo se acepta esta vista cuando la sesión actual es realmente de administrador.
  const asId=Number(req.query?.admin_reseller||0);
- if(asId&&req.auth.admin){
+ // El administrador puede abrir el panel de cualquier revendedor sin tener userId de cliente.
+ if(asId && req.auth?.admin){
    const target=db.prepare("SELECT id,role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(asId);
    if(!target||target.role!=="reseller")return res.status(404).json({error:"Revendedor no encontrado."});
+   if(target.reseller_status!=="active"||!target.reseller_expires_at||new Date(target.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:"El revendedor está vencido o suspendido."});
    req.auth.userId=target.id;
+   return next();
  }
+ if(!req.auth||!req.auth.userId)return res.status(401).json({error:"Debes iniciar sesión."});
  const u=db.prepare("SELECT id,role,reseller_status,reseller_expires_at FROM users WHERE id=?").get(req.auth.userId);
  if(!u||u.role!=="reseller")return res.status(403).json({error:"Cuenta de revendedor requerida."});
  if(u.reseller_status!=="active"||!u.reseller_expires_at||new Date(u.reseller_expires_at).getTime()<Date.now())return res.status(403).json({error:"Tu período de revendedor está vencido o suspendido."});
@@ -717,10 +718,10 @@ app.post('/api/admin/users/:id/password',admin,async(req,res)=>{const id=Number(
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  // En el panel principal del dueño solo aparecen sus clientes directos.
  // Los clientes vinculados a un revendedor se administran dentro de ese revendedor.
- users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users u WHERE role='customer' AND (reseller_id IS NULL OR reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY id DESC").all(),
+ users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id FROM users WHERE role='customer' AND reseller_id IS NULL ORDER BY id DESC").all(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
- topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY t.id DESC").all(),
- purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND (u.reseller_id IS NULL OR u.reseller_id=0 OR NOT EXISTS(SELECT 1 FROM users r WHERE r.id=u.reseller_id AND r.role='reseller')) ORDER BY pu.id DESC").all(),
+ topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND u.reseller_id IS NULL ORDER BY t.id DESC").all(),
+ purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND u.reseller_id IS NULL ORDER BY pu.id DESC").all(),
  compatibility_rules:db.prepare("SELECT * FROM compatibility_rules ORDER BY id").all(),
  resellers:db.prepare(`SELECT r.id,r.name,r.email,r.store_name,r.store_color,r.store_background,r.store_header_background,r.reseller_slug,r.reseller_status,r.reseller_expires_at,r.reseller_plan_months,r.created_at,
    (SELECT COUNT(DISTINCT c.id) FROM users c WHERE c.role='customer' AND (c.reseller_id=r.id OR EXISTS(SELECT 1 FROM reseller_purchases rp0 WHERE rp0.user_id=c.id AND rp0.reseller_id=r.id))) AS client_count
