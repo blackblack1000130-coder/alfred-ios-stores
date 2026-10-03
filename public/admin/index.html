@@ -72,6 +72,29 @@ body.menu-open::after{content:"";position:fixed;inset:0;background:#0008;z-index
 .top h1{font-size:24px}
 }
 </style>
+<style id="v4">
+#attention{margin-top:12px;border:1px solid #6e5423;border-radius:16px;padding:14px;background:#0c0a06}
+#attention h3{margin:0 0 10px;font-size:17px}
+#attention .row{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:10px 0;border-top:1px solid #2a2112;flex-wrap:wrap}
+#attention .row:first-of-type{border-top:0}
+#attention .row b{font-size:15px}
+#attention .btns{display:flex;gap:8px}
+#attention button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;min-height:42px}
+#attention .ok{background:#f7d36d;color:#1a1303}
+#attention .no{background:#2a2112;color:#f2c8c8}
+#attention .go{background:#17140d;color:#f7d36d;border:1px solid #6e5423}
+#attention .empty{color:#9fb3a0}
+.bottom-nav{display:none}
+@media(max-width:700px){
+.bottom-nav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:55;background:#070707f5;border-top:1px solid #6e5423;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px))}
+.bottom-nav button{background:none;border:0;color:#b9a77a;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;min-height:48px;position:relative}
+.bottom-nav button span{font-size:20px}
+.bottom-nav button.on{color:#f7d36d}
+.bottom-nav i{position:absolute;top:2px;right:22%;background:#e5484d;color:#fff;border-radius:9px;font:700 10px/16px system-ui;min-width:16px;text-align:center;font-style:normal}
+.content,.content[class]{padding-bottom:90px!important}
+}
+</style>
+
 </head><body>
 
 <div id="login" class="login"><form class="loginbox" onsubmit="login(event)">
@@ -225,4 +248,33 @@ function openReceipt(src){$('receiptBig').src=src;$('receiptLightbox').classList
 boot();setInterval(refreshCountdowns,1000);setInterval(refreshAdminAlerts,12000);
 </script><script>async function logoutAllSessions(id){if(!confirm('¿Cerrar todas las sesiones de esta cuenta?'))return;try{await api('/api/admin/users/'+id+'/logout-all',{method:'POST'});alert('Sesiones cerradas.')}catch(e){alert(e.message)}}</script>
 <script>document.addEventListener('click',e=>{if(document.body.classList.contains('menu-open')&&e.target.closest('.menu button,.side-bottom button')){setTimeout(()=>document.body.classList.remove('menu-open'),50)}else if(document.body.classList.contains('menu-open')&&!e.target.closest('.side,.menu-toggle')){document.body.classList.remove('menu-open')}})</script>
+<nav class="bottom-nav" id="bottomNav">
+<button onclick="bnGo('home',this)" class="on"><span>🏠</span>Inicio</button>
+<button onclick="bnGo('orders',this)"><span>🛒</span>Pedidos</button>
+<button onclick="bnGo('topups',this)"><span>💰</span>Recargas<i id="bnTop" hidden></i></button>
+<button onclick="bnGo('support',this)"><span>💬</span>Chats<i id="bnChat" hidden></i></button>
+<button onclick="document.body.classList.toggle('menu-open')"><span>☰</span>Más</button>
+</nav>
+<script>
+function bnGo(id,b){try{show(id)}catch(e){};document.querySelectorAll('#bottomNav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');window.scrollTo(0,0)}
+async function attnAct(id,a){try{await topup(id,a)}catch(e){alert(e.message)}renderAttention()}
+function renderAttention(){
+ let box=document.getElementById('attention');
+ if(!box){box=document.createElement('section');box.id='attention';const h=document.getElementById('homeAlerts');h.parentNode.insertBefore(box,h);}
+ const pend=(data.topups||[]).filter(x=>x.status==='pending');
+ const chats=Number((document.getElementById('homeChatCount')||{}).textContent)||0;
+ const reqs=Number((document.getElementById('homeResellerCount')||{}).textContent)||0;
+ const e=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ let h='<h3>Necesita tu atención</h3>';
+ h+=pend.slice(0,5).map(x=>`<div class="row"><div><b>Recarga de ${e(x.user_name||x.name||x.email||'cliente')}</b><br><small>$${e(x.amount)}</small></div><div class="btns"><button class="ok" onclick="attnAct(${x.id},'approve')">Aprobar</button><button class="no" onclick="attnAct(${x.id},'reject')">Rechazar</button></div></div>`).join('');
+ if(pend.length>5)h+=`<div class="row"><span>Y ${pend.length-5} recargas más</span><button class="go" onclick="show('topups')">Ver todas</button></div>`;
+ if(chats)h+=`<div class="row"><b>${chats} chat(s) sin responder</b><button class="go" onclick="show('support')">Responder</button></div>`;
+ if(reqs)h+=`<div class="row"><b>${reqs} solicitud(es) de revendedor</b><button class="go" onclick="show('resellers')">Revisar</button></div>`;
+ if(!pend.length&&!chats&&!reqs)h+='<div class="empty">Todo al día. No hay nada pendiente.</div>';
+ box.innerHTML=h;
+ const set=(id,n)=>{const el=document.getElementById(id);if(el){el.hidden=!n;el.textContent=n}};set('bnTop',pend.length);set('bnChat',chats);
+}
+setInterval(()=>{if(document.getElementById('home')&&document.getElementById('home').classList.contains('active'))renderAttention()},4000);
+setTimeout(renderAttention,1200);
+</script>
 </body></html>
