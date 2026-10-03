@@ -285,7 +285,17 @@ const UPLOAD_DIR=process.env.UPLOAD_DIR||path.join(DATA_ROOT,"uploads");
 fs.mkdirSync(UPLOAD_DIR,{recursive:true});
 const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:50*1024*1024}});
 function logActivity(actorType,actorId,action,details=''){try{db.prepare('INSERT INTO activity_log(actor_type,actor_id,action,details) VALUES(?,?,?,?)').run(String(actorType||'system'),actorId||null,String(action||'').slice(0,180),String(details||'').slice(0,500));}catch(e){console.error('ACTIVITY_LOG',e.message)}}
-app.use((req,res,next)=>{req.auth=readAuth(req);next();});
+for(const [col,type] of [['session_version','INTEGER DEFAULT 0'],['last_active_at','TEXT']]){ if(!db.prepare('PRAGMA table_info(users)').all().some(x=>x.name===col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${type}`); }
+app.use((req,res,next)=>{
+  req.auth=readAuth(req);
+  // Sesiones: si el dueño cerró las sesiones de esta cuenta, la cookie vieja deja de valer.
+  if(req.auth&&req.auth.userId){
+    const u=db.prepare("SELECT session_version v,last_active_at la FROM users WHERE id=?").get(req.auth.userId);
+    if(!u||Number(u.v||0)!==Number(req.auth.v||0)){req.auth=null;}
+    else if(!u.la||Date.now()-new Date(u.la.replace(' ','T')+'Z').getTime()>60000){db.prepare("UPDATE users SET last_active_at=datetime('now') WHERE id=?").run(req.auth.userId);}
+  }
+  next();
+});
 app.get("/tienda/:slug",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller-store.html")));
 app.get("/revendedor",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller.html")));
 app.get("/revendedor-panel",(req,res)=>res.sendFile(path.join(__dirname,"public","reseller.html")));
@@ -557,7 +567,7 @@ app.post("/api/login",rateLimit({windowMs:15*60*1000,max:12,keyPrefix:"login",me
     db.prepare("UPDATE users SET reseller_id=? WHERE id=?").run(owner.id,u.id);
   }
  }
- setAuth(res,{userId:u.id,exp:Date.now()+31536000000});res.json({ok:true});
+ setAuth(res,{userId:u.id,v:Number(u.session_version||0),exp:Date.now()+31536000000});res.json({ok:true});
 });
 app.post("/api/logout",(req,res)=>{clearAuth(res);res.json({ok:true});});
 app.get("/api/me",user,(req,res)=>{
@@ -802,7 +812,7 @@ app.post('/api/admin/users/:id/password',admin,async(req,res)=>{const id=Number(
 app.get("/api/admin/data",admin,(req,res)=>res.json({
  // En el panel principal del dueño solo aparecen sus clientes directos.
  // Los clientes vinculados a un revendedor se administran dentro de ese revendedor.
- users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id,account_status FROM users WHERE role='customer' AND reseller_id IS NULL AND COALESCE(account_status,'active')!='deleted' ORDER BY id DESC").all(),
+ users:db.prepare("SELECT id,name,email,balance,iphone_model,ios_version,created_at,role,reseller_id,account_status,last_active_at FROM users WHERE role='customer' AND reseller_id IS NULL AND COALESCE(account_status,'active')!='deleted' ORDER BY id DESC").all(),
  products:db.prepare("SELECT * FROM products ORDER BY id DESC").all(), categories:db.prepare("SELECT * FROM categories ORDER BY sort_order,id").all(), payment_methods:db.prepare("SELECT * FROM payment_methods ORDER BY sort_order,id").all(), category_downloads:db.prepare("SELECT * FROM category_downloads ORDER BY category").all(),
  topups:db.prepare("SELECT t.*,u.name,u.email,pm.name payment_method_name,pm.account payment_method_account FROM topups t JOIN users u ON u.id=t.user_id LEFT JOIN payment_methods pm ON pm.id=t.payment_method_id WHERE u.role='customer' AND u.reseller_id IS NULL AND t.reseller_id IS NULL ORDER BY t.id DESC").all(),
  purchases:db.prepare("SELECT pu.*,u.name,u.email,p.name product_name FROM purchases pu JOIN users u ON u.id=pu.user_id JOIN products p ON p.id=pu.product_id WHERE u.role='customer' AND u.reseller_id IS NULL ORDER BY pu.id DESC").all(),
@@ -892,6 +902,16 @@ app.post("/api/admin/users/:id/balance",admin,(req,res)=>{
  logActivity('customer',u.id,mode==='set'?'Saldo establecido':'Saldo agregado',`US$${mode==='set'?value:value} · ${note}`);res.json({ok:true,balance:mode==='set'?value:u.balance+value});
 });
 
+app.post('/api/admin/users/:id/logout-all',admin,(req,res)=>{const id=Number(req.params.id);const u=db.prepare("SELECT id,name FROM users WHERE id=?").get(id);if(!u)return res.status(404).json({error:'Cuenta no encontrada.'});db.prepare("UPDATE users SET session_version=COALESCE(session_version,0)+1 WHERE id=?").run(id);logActivity('admin',null,'Sesiones cerradas','Se cerraron todas las sesiones de '+u.name);res.json({ok:true});});
+app.get('/api/admin/dashboard',admin,(req,res)=>{const c=(q)=>db.prepare(q).get().n;res.json({
+ customers:c("SELECT COUNT(*) n FROM users WHERE role='customer' AND COALESCE(account_status,'active')!='deleted'"),
+ topups_pending:c("SELECT COUNT(*) n FROM topups WHERE status='pending'"),
+ purchases:c("SELECT COUNT(*) n FROM purchases")+c("SELECT COUNT(*) n FROM reseller_purchases"),
+ reseller_requests:c("SELECT COUNT(*) n FROM reseller_requests WHERE status='pending'"),
+ resellers_active:c("SELECT COUNT(*) n FROM users WHERE role='reseller' AND reseller_status='active'"),
+ resellers_expiring:db.prepare("SELECT id,name,reseller_expires_at FROM users WHERE role='reseller' AND reseller_status='active' AND reseller_expires_at IS NOT NULL AND julianday(reseller_expires_at)-julianday('now')<=7 ORDER BY reseller_expires_at").all(),
+ topups_stale:c("SELECT COUNT(*) n FROM topups WHERE status='pending' AND julianday('now')-julianday(created_at)>1")
+});});
 app.get('/api/admin/activity',admin,(req,res)=>res.json(db.prepare(`SELECT a.*,COALESCE(u.name,'Administrador') actor_name,COALESCE(u.email,'') actor_email FROM activity_log a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 150`).all()));
 app.get('/api/reseller/activity',reseller,(req,res)=>res.json(db.prepare(`SELECT a.*,COALESCE(u.name,'Cliente') actor_name,COALESCE(u.email,'') actor_email FROM activity_log a LEFT JOIN users u ON u.id=a.actor_id WHERE (a.actor_type='reseller' AND a.actor_id=?) OR (a.actor_type='customer' AND EXISTS(SELECT 1 FROM users c WHERE c.id=a.actor_id AND c.reseller_id=?)) OR (a.actor_type='reseller_sale' AND a.actor_id=?) ORDER BY a.id DESC LIMIT 100`).all(req.auth.userId,req.auth.userId,req.auth.userId)));
 app.listen(PORT,()=>console.log("ALFRED IOS STORES en puerto "+PORT));
